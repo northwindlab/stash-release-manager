@@ -48,7 +48,35 @@ def judge(file_seconds, tag_id, found, durations, kept=False):
             "how": f"ambiguous: the file is registered at {n + 1} scenes and the provider has no length for this one to compare"}
 
 
-def enrich(client, found, durations):
+def split_exact(client, local_fps, found, tag_id):
+    """([exact], [near]): `found` is what the provider's reverse lookup returned. Its PHASH lookup is a SIMILARITY search (a few bits of tolerance), so VR scenes
+    with the same frame layout, black intros and the like come back although they are other videos (found 2026-10-25: 5 of 6 'other scenes' of one file
+    were at picture-hash distance 4). Only a scene that has an exactly equal hash (OSHASH or PHASH, distance 0) registered is a real second owner of the
+    file's fingerprint. `local_fps`: iterable of (algorithm, hash). The tag itself always counts as exact. A candidate whose fingerprints cannot be read
+    stays in `exact` (the safe side)."""
+    mine = {(a.upper(), h) for a, h in local_fps if h}
+    exact, near = [], []
+    for f in found:
+        if f["id"] == tag_id:
+            exact.append(f)
+            continue
+        try:
+            theirs = {(x["algorithm"].upper(), x["hash"]) for x in client.get_scene_fingerprints(f["id"])}
+        except Exception:  # noqa: BLE001
+            logger.exception("shared fingerprint: fingerprints of %s could not be read", f["id"])
+            exact.append(f)
+            continue
+        (exact if mine & theirs else near).append(f)
+    return exact, near
+
+
+def settle(db, scene_id):
+    """The scene is fine now (a later check found a unique or length-confirmed match): an open row is closed."""
+    with db.connect() as conn:
+        conn.execute("UPDATE shared_fingerprint_review SET status = 'resolved', resolved_at = datetime('now') WHERE scene_id = ? AND status = 'open'", (str(scene_id),))
+
+
+def enrich(client, found, durations, near=()):
     """The candidates with studio and date for the review list (a few detail requests, only for scenes that need a decision)."""
     out = []
     for f in found:
@@ -59,6 +87,8 @@ def enrich(client, found, durations):
         except Exception:  # noqa: BLE001
             logger.exception("shared fingerprint: detail of %s failed", f["id"])
         out.append(entry)
+    for f in near:  # similar picture hash only: listed for understanding, not counted
+        out.append({"id": f["id"], "title": f.get("title"), "seconds": durations.get(f["id"]), "studio": None, "date": None, "near": True})
     return out
 
 
@@ -130,23 +160,50 @@ def open_count(db):
 
 def make_judge(db, lookup, provider_key):
     """The `judge(entry, found)` that library_check.find_library_mismatches() calls for a file registered at several scenes. `entry` carries id, title,
-    paths, stashdb_id (the tag) and seconds. A verdict that is not ok also lands on the review list."""
+    paths, stashdb_id (the tag), fps ([{"hash", "algorithm"}]) and seconds. Candidates that only have a SIMILAR picture hash are set aside first
+    (split_exact). A verdict that is not ok also lands on the review list."""
     client = getattr(lookup, "client", lookup)  # ThePornDB's one-hash wrapper keeps the real client here
 
     def judge(entry, found):
-        ids = [f["id"] for f in found]
+        exact, near = split_exact(client, [(f["algorithm"], f["hash"]) for f in entry.get("fps") or []], found, entry["stashdb_id"])
+        ids = [f["id"] for f in exact]
         try:
             durations = client.scene_durations(ids) if hasattr(client, "scene_durations") else {}
         except Exception:  # noqa: BLE001
             logger.exception("shared fingerprint: lengths of %s failed", ids)
             durations = {}
-        verdict = judge_one(db, entry, found, durations)
-        if not verdict["ok"]:
+        verdict = judge_one(db, entry, exact, durations)
+        verdict["near"] = near
+        if verdict["ok"]:
+            settle(db, entry["id"])
+        else:
             upsert(db, entry["id"], entry["title"], (entry.get("paths") or [""])[0], entry.get("seconds"), provider_key, entry["stashdb_id"],
-                   verdict["reason"], verdict["how"], enrich(client, found, durations))
+                   verdict["reason"], verdict["how"], enrich(client, exact, durations, near))
         return verdict
     return judge
 
 
 def judge_one(db, entry, found, durations):
     return judge(entry.get("seconds"), entry["stashdb_id"], found, durations, kept=is_kept(db, entry["id"], entry["stashdb_id"]))
+
+
+def _norm(text):
+    return "".join(ch for ch in (text or "").lower() if ch.isalnum())
+
+
+def is_harmless(row):
+    """A row the user can safely confirm in bulk: the tag's length fits the file, every OTHER scene whose length fits has the same studio as the tag (so
+    the studio folder cannot be wrong), the file already sits in that studio's folder, and the scene's own title is the tag's title (nothing was
+    changed by hand since). Only 'also_fits' rows qualify -- the others have a length problem."""
+    if row.get("reason") != "also_fits":
+        return False
+    cands = [c for c in row.get("candidates") or [] if not c.get("near")]
+    tag = next((c for c in cands if c["id"] == row["tag_id"]), None)
+    if not tag or not tag.get("studio"):
+        return False
+    fitting = [c for c in cands if c["id"] != row["tag_id"] and fits(row.get("file_seconds"), c.get("seconds"))]
+    if not fitting or any(_norm(c.get("studio")) != _norm(tag["studio"]) for c in fitting):
+        return False
+    parts = (row.get("file_path") or "").split("/")
+    return len(parts) > 4 and parts[1] == "data" and parts[2] == "scenes" and _norm(parts[3]) == _norm(tag["studio"]) \
+        and _norm(row.get("local_title")) == _norm(tag.get("title"))

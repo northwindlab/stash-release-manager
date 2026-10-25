@@ -405,10 +405,9 @@ class Organizer:
                     except Exception:
                         logger.exception("shared scan: %s lookup failed", self.name_of(box))
                         continue
-                    lengths = self._lengths(client, [m["id"] for found in results if found and len(found) > 1 for m in found])
                     for (s, tag, f, _), found in zip(chunk, results):
                         if found and len(found) > 1 and any(m["id"] == tag for m in found):
-                            ok, _how = self._judge_shared(box, client, s, f, tag, found, lengths)
+                            ok, _how = self._judge_shared(box, client, s, f, tag, found)
                             if not ok:
                                 seen.add(str(s["id"]))
                                 _shared_scan["found"] += 1
@@ -482,11 +481,10 @@ class Organizer:
                 except Exception:
                     logger.exception("organize: %s fingerprint lookup failed", self.name_of(box))
                     matches = [None] * len(chunk)
-                lengths = self._lengths(client, [m["id"] for found in matches if found and len(found) > 1 for m in found])
                 for (scene, file, provider_id), found in zip(chunk, matches):
                     if found and any(m.get("id") == provider_id for m in found):
                         if len(found) > 1:  # registered at several scenes: the tag being one of them proves little (v0.246.0)
-                            result[file["id"]] = self._judge_shared(box, client, scene, file, provider_id, found, lengths)
+                            result[file["id"]] = self._judge_shared(box, client, scene, file, provider_id, found)
                         else:
                             result[file["id"]] = (True, "fingerprint")
                     else:
@@ -507,13 +505,19 @@ class Organizer:
             logger.exception("organize: provider lengths failed")
         return out
 
-    def _judge_shared(self, box, client, scene, file, provider_id, found, lengths):
-        """(ok, how) for a file registered at several provider scenes; what the length cannot settle goes to the review list."""
-        verdict = shared_fingerprint.judge(file.get("duration"), provider_id, found, lengths,
+    def _judge_shared(self, box, client, scene, file, provider_id, found):
+        """(ok, how) for a file registered at several provider scenes. Scenes that only have a SIMILAR picture hash are set aside first
+        (shared_fingerprint.split_exact); what the length cannot settle goes to the review list."""
+        local = [(fp["type"], fp["value"]) for fp in file.get("fingerprints") or [] if fp.get("type") in ("oshash", "phash", "md5")]
+        exact, near = shared_fingerprint.split_exact(client, local, found, provider_id)
+        lengths = self._lengths(client, [m["id"] for m in exact])
+        verdict = shared_fingerprint.judge(file.get("duration"), provider_id, exact, lengths,
                                            kept=shared_fingerprint.is_kept(self.db, scene["id"], provider_id))
-        if not verdict["ok"]:
+        if verdict["ok"]:
+            shared_fingerprint.settle(self.db, scene["id"])
+        else:
             shared_fingerprint.upsert(self.db, scene["id"], scene.get("title"), file["path"], file.get("duration"), box, provider_id,
-                                      verdict["reason"], verdict["how"], shared_fingerprint.enrich(client, found, lengths))
+                                      verdict["reason"], verdict["how"], shared_fingerprint.enrich(client, exact, lengths, near))
         return (verdict["ok"], verdict["how"])
 
     def _provider_metadata(self, scene):

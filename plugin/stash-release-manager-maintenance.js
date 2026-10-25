@@ -568,7 +568,8 @@
       });
       return el('li', { className: 'srw-release-item' }, [
         cb,
-        el('span', { textContent: `${f.scene_title} → ${candidateTitle}` }),
+        el('span', {}, [`${f.scene_title} → `, f.candidates[0] ? el('a', { href: window.SRW.sceneUrl(f.provider || 'stashdb', f.candidates[0].id), target: '_blank', rel: 'noopener noreferrer',
+          title: `Open this scene at ${window.SRW.providerLabel(f.provider || 'stashdb')} (new tab)`, textContent: candidateTitle }) : candidateTitle]),
         f.scene_id ? window.SRW.buildStashLink('scene', f.scene_id) : null,
         dismissBtn,
       ]);
@@ -732,7 +733,11 @@
       const pathLines = (f.file_paths || []).map((p) => el('div', { className: 'srw-maintenance-file-path', textContent: p }));
       return el('li', { className: 'srw-release-item' }, [
         el('div', {}, [
-          el('span', { textContent: `[${f.kind}] ${f.scene_title} -- ${detail}` }),
+          f.kind === 'ambiguous'
+            ? el('span', {}, [`[${f.kind}] ${f.scene_title} -- ${f.reason ? `${f.reason}. ` : ''}candidates: `,
+              ...(f.candidates || []).flatMap((c, i) => [i ? ', ' : '', el('a', { href: window.SRW.sceneUrl(f.provider || 'stashdb', c.id), target: '_blank', rel: 'noopener noreferrer',
+                title: `Open this scene at ${window.SRW.providerLabel(f.provider || 'stashdb')} (new tab)`, textContent: c.title || c.id })])])
+            : el('span', { textContent: `[${f.kind}] ${f.scene_title} -- ${detail}` }),
           ...pathLines,
           note,
         ]),
@@ -1425,6 +1430,25 @@
     return section;
   }
 
+  // Five real frames cut from THIS file (shared by Compare scenes / Review and Shared fingerprints): a decision made by looking needs them.
+  function buildSceneFrames(sceneId) {
+    const { el } = window.SRW;
+    const strip = el('div', { className: 'srw-cmp-frames' });
+    const btn = window.SRW.iconButton('button', 'faImages', 'Show frames from the file', { className: 'srw-btn srw-btn-sm',
+      title: 'Five frames cut from THIS file (10/30/50/70/90 %). Stash’s own screenshot is only the provider’s cover image.',
+      onClick: async () => {
+        btn.disabled = true; strip.textContent = 'cutting frames…';
+        const r = await window.SRW.runOp('compare_frames', { scene_id: sceneId });
+        btn.disabled = false;
+        if (r.error) { strip.textContent = `error: ${r.error}`; return; }
+        strip.replaceChildren(...(r.frames || []).map((f) => el('figure', { className: 'srw-cmp-frame' }, [
+          f.data_url ? el('img', { src: f.data_url, alt: '' }) : el('div', { className: 'srw-hint', textContent: 'no frame' }),
+          el('figcaption', { className: 'srw-hint', textContent: `${Math.floor(f.t / 60)}:${String(f.t % 60).padStart(2, '0')}` }),
+        ])));
+      } });
+    return el('div', {}, [el('div', { className: 'srw-toolbar' }, [btn, el('span', { className: 'srw-hint', textContent: 'Stash’s cover image is the provider’s picture, not from this file.' })]), strip]);
+  }
+
   // Files registered at several provider scenes (v0.246.0, api/shared_fingerprint.py): the same fingerprint sits on more than one scene (a re-release of the
   // same footage), so "the tag is one of them" proves little. The list stays until the user has settled each scene (or a scan finds it fine).
   function buildSharedPane(countSpan) {
@@ -1454,7 +1478,7 @@
         view = window.SRW.buildFilteredPagedList({
           filters: ['search'], perPage: 15, showFilterBarFrom: 10,
           emptyText: 'Nothing to decide here.',
-          fetchPage: window.SRW.localPageFetcher(() => rows, { text: (c) => `${c.local_title} ${c.file_path} ${c.candidates.map((x) => `${x.title} ${x.studio}`).join(' ')}` }),
+          fetchPage: window.SRW.localPageFetcher(() => rows, { text: (c) => `${c.local_title} ${c.file_path} ${c.candidates.filter((x) => !x.near).map((x) => `${x.title} ${x.studio}`).join(' ')}` }),
           renderItems: (items) => el('ul', { className: 'srw-release-list' }, items.map(buildRow)),
         });
         list.appendChild(view.node);
@@ -1466,10 +1490,11 @@
 
     function buildRow(c) {
       const sameTitle = (t) => Boolean(t && c.local_title && t.trim().toLowerCase() === c.local_title.trim().toLowerCase());
-      const cands = c.candidates.map((x) => {
+      const nearList = c.candidates.filter((x) => x.near);
+      const cands = c.candidates.filter((x) => !x.near).map((x) => {
         const isTag = x.id === c.tag_id;
         const chips = [isTag ? 'tagged now' : null, fits(c.file_seconds, x.seconds) ? 'length fits the file' : null, sameTitle(x.title) ? 'same title as your scene' : null]
-          .filter(Boolean).map((t) => el('span', { className: 'srw-chip', textContent: t }));
+          .filter(Boolean).map((t) => el('span', { className: t === 'tagged now' ? 'srw-chip srw-chip-tagged' : 'srw-chip', textContent: t }));
         const use = !isTag && c.status === 'open' ? el('button', { type: 'button', className: 'srw-btn', textContent: 'Use this scene',
           title: 'Give your scene this provider scene (title, date, studio, performers); your scene is saved first. Rename / move the file afterwards under "Scenes by studio".',
           onClick: (e) => confirmInline(e.currentTarget, `Give "${c.local_title}" the scene "${x.title}" (${x.studio || '?'}, ${x.date || '?'})? Its metadata is replaced; the old state is saved.`, async () => {
@@ -1478,9 +1503,11 @@
             notify('Shared fingerprints', 'Done. The file is renamed / moved by "Scenes by studio" (Recount, then Details).', 'success');
             await load();
           }) }) : null;
-        return el('li', {}, [el('strong', { textContent: x.title || x.id }), ` — ${x.studio || '?'}, ${x.date || '?'}, ${fmtMin(x.seconds)} `, ...chips, ' ', use]);
+        const page = el('a', { href: window.SRW.sceneUrl(c.provider || 'stashdb', x.id), target: '_blank', rel: 'noopener noreferrer',
+          title: `Open this scene at ${window.SRW.providerLabel(c.provider || 'stashdb')} (new tab)` }, [el('strong', { textContent: x.title || x.id })]);
+        return el('li', { className: isTag ? 'srw-shared-tagged' : '' }, [page, ` — ${x.studio || '?'}, ${x.date || '?'}, ${fmtMin(x.seconds)} `, ...chips, ' ', use]);
       });
-      const actions = [window.SRW.buildStashLink('scene', c.scene_id, 'Play in Stash')];
+      const actions = [];
       if (c.status === 'open') {
         actions.push(el('button', { type: 'button', className: 'srw-btn', textContent: 'Tag is right', title: 'Keep the current tag; this scene is not listed again',
           onClick: async () => { await window.SRW.runOp('organize_shared_keep', { scene_id: c.scene_id }); await load(); } }));
@@ -1489,10 +1516,16 @@
       }
       return el('li', { className: 'srw-release-row' }, [
         el('div', { className: 'srw-rr-main' }, [
-          el('div', {}, [el('a', { href: `/scenes/${c.scene_id}`, textContent: c.local_title || c.file_path.split('/').pop() }), ` — file ${fmtMin(c.file_seconds)}`]),
+          el('div', { className: 'srw-toolbar' }, [window.SRW.buildStashLink('scene', c.scene_id, 'Play in Stash'),
+            el('a', { href: `/scenes/${c.scene_id}`, target: '_blank', rel: 'noopener noreferrer', title: 'Open the scene in Stash (new tab)', textContent: c.local_title || c.file_path.split('/').pop() }), ` — file ${fmtMin(c.file_seconds)}`]),
           el('div', { className: 'srw-hint', textContent: c.file_path }),
+          buildSceneFrames(c.scene_id),
           el('div', { className: 'srw-review-warning', textContent: c.how }),
-          el('ul', { className: 'srw-hint' }, cands),
+          el('ul', { className: 'srw-shared-cands' }, cands),
+          nearList.length ? el('details', { className: 'srw-hint' }, [
+            el('summary', { textContent: `${nearList.length} more scene(s) the provider returned only because their picture hash is SIMILAR (not equal) -- not counted` }),
+            el('ul', {}, nearList.map((x) => el('li', {}, [el('a', { href: window.SRW.sceneUrl(c.provider || 'stashdb', x.id), target: '_blank', rel: 'noopener noreferrer', textContent: x.title || x.id })]))),
+          ]) : null,
         ]),
         el('div', { className: 'srw-rr-actions' }, actions),
       ]);
@@ -1501,11 +1534,27 @@
     const scanBtn = el('button', { type: 'button', className: 'srw-btn', textContent: 'Scan the library',
       title: 'Looks up every scene with a provider id and lists those whose file is registered at several provider scenes and where the length cannot confirm the tag. Changes nothing.',
       onClick: async () => { const r = await window.SRW.runOp('organize_shared_scan'); if (r.error) { notify('Scan', r.error, 'error'); return; } load(); } });
+    const safeBtn = el('button', { type: 'button', className: 'srw-btn', textContent: 'Confirm the harmless ones',
+      title: 'Marks "Tag is right" for every scene where the length fits the tag, all other scenes the file is registered at belong to the SAME studio, the file already sits in that studio\'s folder and the scene carries the tag\'s title',
+      onClick: async (e) => {
+        const btn = e.currentTarget;
+        btn.disabled = true;
+        const dry = await window.SRW.runOp('organize_shared_keep_safe', { dry: true });
+        btn.disabled = false;
+        if (dry.error) { notify('Shared fingerprints', dry.error, 'error'); return; }
+        if (!dry.count) { notify('Shared fingerprints', 'No scene qualifies as harmless.', 'info'); return; }
+        confirmInline(btn, `Confirm the tag of ${dry.count} scene(s)? Their file is registered at other scenes of the same studio only, the length fits the tag, the folder is right and the title is the tag's.`, async () => {
+          const r = await window.SRW.runOp('organize_shared_keep_safe', {});
+          if (r.error) { notify('Shared fingerprints', r.error, 'error'); return; }
+          notify('Shared fingerprints', `${r.count} scene(s) confirmed.`, 'success');
+          await load();
+        });
+      } });
     const pane = el('div', {}, [
       el('p', { className: 'srw-hint', textContent: 'Fingerprints are crowd-sourced: when the same footage was released twice (another site re-sold it), the same fingerprint sits on two or more provider scenes. '
         + 'Then "the tag is one of the matches" proves little, and a file can be filed under the wrong studio. Here are the scenes where the length of the file does not settle it. '
         + 'Pick the right scene, keep the tag, or dismiss. A scene stays here until you have decided or a scan finds it fine.' }),
-      el('div', { className: 'srw-toolbar' }, [scanBtn, stateSelect, status]),
+      el('div', { className: 'srw-toolbar' }, [scanBtn, safeBtn, stateSelect, status]),
       scanLine,
       list,
     ]);
@@ -3150,7 +3199,7 @@
       }
       return el('li', { className: 'srw-release-row srw-upgrade-row' }, [
         el('div', { className: 'srw-rr-main' }, [
-          el('div', {}, [cb, ' ', el('a', { href: `/scenes/${c.scene_id}`, textContent: c.scene_title || c.file_path.split('/').pop() }), ' ',
+          el('div', {}, [cb, ' ', el('a', { href: `/scenes/${c.scene_id}`, target: '_blank', rel: 'noopener noreferrer', title: 'Open the scene in Stash (new tab)', textContent: c.scene_title || c.file_path.split('/').pop() }), ' ',
             el('span', { className: 'srw-chip', textContent: modeLabel, title: modeTitle })]),
           el('div', { className: 'srw-hint', textContent: c.file_path }),
           el('div', { className: 'srw-chips' }, facts.map((t) => el('span', { className: 'srw-chip', textContent: t }))),
@@ -4027,22 +4076,7 @@
     }
 
     // Real frames cut from the file (5 positions) -- the Stash screenshot/cover is the provider's image and says nothing about the file.
-    function buildFramesStrip(s) {
-      const strip = el('div', { className: 'srw-cmp-frames' });
-      const btn = window.SRW.iconButton('button', 'faImages', 'Show frames from the file', { className: 'srw-btn srw-btn-sm',
-        title: 'Five frames cut from THIS file (10/30/50/70/90 %). Stash’s own screenshot is only the provider’s cover image.',
-        onClick: async () => {
-          btn.disabled = true; strip.textContent = 'cutting frames…';
-          const r = await window.SRW.runOp('compare_frames', { scene_id: s.id });
-          btn.disabled = false;
-          if (r.error) { strip.textContent = `error: ${r.error}`; return; }
-          strip.replaceChildren(...(r.frames || []).map((f) => el('figure', { className: 'srw-cmp-frame' }, [
-            f.data_url ? el('img', { src: f.data_url, alt: '' }) : el('div', { className: 'srw-hint', textContent: 'no frame' }),
-            el('figcaption', { className: 'srw-hint', textContent: `${Math.floor(f.t / 60)}:${String(f.t % 60).padStart(2, '0')}` }),
-          ])));
-        } });
-      return el('div', {}, [el('div', { className: 'srw-toolbar' }, [btn, el('span', { className: 'srw-hint', textContent: 'Stash’s cover image is the provider’s picture, not from this file.' })]), strip]);
-    }
+    function buildFramesStrip(s) { return buildSceneFrames(s.id); }
 
     // For a scene without a provider id: find out what it really is (exact fingerprints, then a name search), put
     // the provider's id + metadata on it, or clear what a wrong match left behind and mark it for review.

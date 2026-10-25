@@ -540,6 +540,8 @@ def main():
                        {"scene_id": args.get("scene_id"), "stash_id": args.get("stash_id")}, timeout=60)
     elif mode == "organize_shared":
         result = _get(sidecar_url, f"/maintenance/organize/shared?status={args.get('status') or 'open'}", timeout=60)
+    elif mode == "organize_shared_keep_safe":
+        result = _post(sidecar_url, "/maintenance/organize/shared/keep-safe", {"dry": bool(args.get("dry"))}, timeout=300)
     elif mode == "organize_shared_scan":
         result = _post(sidecar_url, "/maintenance/organize/shared/scan", {}, timeout=30)
     elif mode == "organize_shared_use":

@@ -368,6 +368,33 @@ def organize_shared_keep(scene_id: str):
     return {"changed": shared_fingerprint.set_status(_db, scene_id, "kept", tag_id=tag)}
 
 
+@router.post("/organize/shared/keep-safe")
+def organize_shared_keep_safe(body: dict | None = None):
+    """"Confirm the harmless ones": open rows where the length fits the tag, all other fitting scenes are at the SAME studio, the file already sits in
+    that studio's folder and the scene carries the tag's title (shared_fingerprint.is_harmless). `dry` only counts. The tag and the file path are read
+    from Stash again first, so a scene changed since the scan is left alone."""
+    dry = bool((body or {}).get("dry"))
+    candidates = [r for r in shared_fingerprint.rows(_db) if shared_fingerprint.is_harmless(r)]
+    stash = _get_stash_client()
+    organizer = _organizer()
+    safe = []
+    for i in range(0, len(candidates), 50):
+        chunk = candidates[i:i + 50]
+        data = stash._graphql("query($ids: [Int!]) { findScenes(scene_ids: $ids, filter: {per_page: -1}) { scenes { id stash_ids { endpoint stash_id } files { path } } } }",
+                              {"ids": [int(r["scene_id"]) for r in chunk]})["findScenes"]["scenes"]
+        now = {str(s["id"]): s for s in data}
+        for r in chunk:
+            s = now.get(str(r["scene_id"]))
+            endpoint = organizer.endpoint_of(r["provider"])
+            tag = next((x["stash_id"] for x in (s or {}).get("stash_ids") or [] if x["endpoint"] == endpoint), None)
+            if s and tag == r["tag_id"] and any(f["path"] == r["file_path"] for f in s["files"]):
+                safe.append(r)
+    if not dry:
+        for r in safe:
+            shared_fingerprint.set_status(_db, r["scene_id"], "kept", note="confirmed in bulk (harmless)", tag_id=r["tag_id"])
+    return {"count": len(safe), "of_open": len(shared_fingerprint.rows(_db)) + (0 if dry else len(safe)), "dry": dry}
+
+
 @router.post("/organize/shared/{scene_id}/dismiss")
 def organize_shared_dismiss(scene_id: str):
     return {"changed": shared_fingerprint.set_status(_db, scene_id, "dismissed")}

@@ -341,7 +341,7 @@
                 el('span', { textContent: [i.year, i.site, i.minutes ? `${Math.round(i.minutes)} min` : null,
                   i.folded ? `+${i.folded} thinner ThePornDB entr${i.folded === 1 ? 'y' : 'ies'} of this number hidden` : null].filter(Boolean).join(' — ') }),
                 i.url ? el('a', { href: i.url, target: '_blank', rel: 'noopener noreferrer', textContent: '  ThePornDB ↗' }) : null,
-                i.group_id ? el('a', { href: `/groups/${i.group_id}`, textContent: '  Group in Stash →' }) : null].filter(Boolean)),
+                i.group_id ? el('a', { href: `/groups/${i.group_id}`, target: '_blank', rel: 'noopener noreferrer', textContent: '  Group in Stash →' }) : null].filter(Boolean)),
             ]),
             el('div', { className: 'srw-row-actions' }, [
               i.state === 'available' || i.state === 'empty-group' ? el('button', { className: 'srw-btn', textContent: 'Add to wishlist',

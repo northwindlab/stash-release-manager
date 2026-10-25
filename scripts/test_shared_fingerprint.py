@@ -47,9 +47,25 @@ sf.set_status(DB, "9", "retagged", note="old", tag_id="new")
 sf.upsert(DB, "9", "Nine", "/data/9.mp4", 100, "stashdb", "new", "no_length", "h", [])
 check("after 'Use this scene' the row stays settled for the NEW tag (and is trusted by Organize)", sf.counts(DB).get("retagged") == 1 and sf.is_kept(DB, "9", "new") and not sf.is_kept(DB, "9", "old"))
 
+# ---- bulk confirm: what counts as harmless
+def hrow(**kw):
+    base = {"scene_id": "1", "reason": "also_fits", "tag_id": "t", "file_seconds": 1000, "local_title": "Same Title", "file_path": "/data/scenes/Evil Angel/Same Title - 2020-01-01/f.mp4",
+            "candidates": [{"id": "t", "title": "Same Title", "studio": "Evil Angel", "seconds": 1000}, {"id": "o", "title": "Other", "studio": "Evil Angel", "seconds": 1010}]}
+    base.update(kw); return base
+check("harmless: same studio everywhere, folder right, title is the tag's", sf.is_harmless(hrow()))
+check("harmless: a fitting scene at another studio is not harmless", not sf.is_harmless(hrow(candidates=[{"id": "t", "title": "Same Title", "studio": "Evil Angel", "seconds": 1000}, {"id": "o", "title": "O", "studio": "Wankz", "seconds": 1010}])))
+check("harmless: a scene at another studio whose length does NOT fit is ignored", sf.is_harmless(hrow(candidates=[{"id": "t", "title": "Same Title", "studio": "Evil Angel", "seconds": 1000}, {"id": "o", "title": "O", "studio": "Wankz", "seconds": 3000}, {"id": "p", "title": "P", "studio": "Evil Angel", "seconds": 1005}])))
+check("harmless: the file in another studio's folder is not harmless", not sf.is_harmless(hrow(file_path="/data/scenes/Wankz/Same Title - 2020-01-01/f.mp4")))
+check("harmless: a title changed by hand is not harmless", not sf.is_harmless(hrow(local_title="My own title")))
+check("harmless: other reasons never qualify", not sf.is_harmless(hrow(reason="other_fits")) and not sf.is_harmless(hrow(reason="no_length")))
+check("harmless: studio spelling (spaces, case) does not matter", sf.is_harmless(hrow(file_path="/data/scenes/EvilAngel/Same Title - 2020-01-01/f.mp4")))
+
 # ---- library_check.find_library_mismatches with the judge
 class Client:
-    def __init__(self, table): self.table = table
+    def __init__(self, table, near=()):
+        self.table, self.near = table, set(near)  # `near`: scene ids that the lookup returns but that have no exactly equal hash (a similar picture hash only)
+    def get_scene_fingerprints(self, i):
+        return [{"algorithm": "OSHASH", "hash": h} for h, found in self.table.items() if any(f["id"] == i for f in found) and i not in self.near]
     def find_scenes_by_fingerprints(self, sets): return [self.table.get(s[0]["hash"], []) for s in sets]
     def scene_durations(self, ids): return {i: D.get(i) for i in ids}
     def get_scene_detail(self, i): return {"title": i, "date": "2020-01-01", "studio": {"name": "S-" + i}}
@@ -63,6 +79,18 @@ check("check page: the shared one the length cannot confirm is 'ambiguous' with 
 check("check page: it also lands on the review list, with studio and length of the candidates", any(r["scene_id"] == "2" and r["candidates"][0]["studio"] for r in sf.rows(DB)))
 matches, _, ambiguous, _ = library_check.find_library_mismatches(client, scenes, "ep", delay=0)
 check("without a judge the old behaviour stays (tag among the matches = match)", len(matches) == 3 and not ambiguous)
+
+# ---- scenes that only have a SIMILAR picture hash are not second owners of the fingerprint
+near_client = Client({"h1": [M("tag"), M("wank")], "h4": [M("tag"), M("wank"), M("kin")]}, near={"wank", "kin"})
+sc4 = [scene("4", "tag", "h4", 2261)]
+j4 = sf.make_judge(DB, near_client, "stashdb")
+matches, _, ambiguous, _ = library_check.find_library_mismatches(near_client, sc4, "ep", delay=0, judge=j4)
+check("near-only candidates are ignored: the file counts as a unique match, nothing is listed", len(matches) == 1 and not ambiguous and not any(r["scene_id"] == "4" for r in sf.rows(DB)))
+ex, nr = sf.split_exact(near_client, [("OSHASH", "h4")], [M("tag"), M("wank"), M("kin")], "tag")
+check("split_exact: the tag stays, the scenes without an equal hash are 'near'", [f["id"] for f in ex] == ["tag"] and [f["id"] for f in nr] == ["wank", "kin"])
+sf.upsert(DB, "4", "Four", "/data/4.mp4", 100, "stashdb", "tag", "no_length", "h", [])
+j4(scene("4", "tag", "h4", 2261) | {"paths": ["/data/4.mp4"], "stashdb_id": "tag", "fps": [{"hash": "h4", "algorithm": "OSHASH"}], "seconds": 2261}, [M("tag"), M("wank")])
+check("a later check that finds the scene fine settles its open row", not any(r["scene_id"] == "4" for r in sf.rows(DB)))
 
 # ---- Organizer._verify
 class Stash:

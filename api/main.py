@@ -697,21 +697,26 @@ def _stashdb_or_none():
 
 def _shared_fingerprint_hint(scene, file, provider_scene_id, found, client):
     """verification.shared_hook (v0.246.2): a verified download whose file is registered at several provider scenes. If the length does not single the
-    scene out, it goes on the Shared fingerprints list and into History as a hint; the import itself is not stopped."""
+    scene out, it goes on the Shared fingerprints list and into History as a hint; the import itself is not stopped. Scenes that only have a SIMILAR picture
+    hash do not count (shared_fingerprint.split_exact)."""
     import shared_fingerprint
+    local = [(fp["type"], fp["value"]) for fp in file.get("fingerprints") or [] if fp.get("type") in ("oshash", "phash", "md5")]
+    exact, near = shared_fingerprint.split_exact(client, local, found, provider_scene_id)
+    if len(exact) < 2:
+        return
     try:
-        durations = client.scene_durations([f["id"] for f in found]) if hasattr(client, "scene_durations") else {}
+        durations = client.scene_durations([f["id"] for f in exact]) if hasattr(client, "scene_durations") else {}
     except Exception:
         durations = {}
-    verdict = shared_fingerprint.judge(file.get("duration"), provider_scene_id, found, durations,
+    verdict = shared_fingerprint.judge(file.get("duration"), provider_scene_id, exact, durations,
                                        kept=shared_fingerprint.is_kept(db, scene["id"], provider_scene_id))
     if verdict["ok"]:
         return
     provider = _organizer().provider_of_endpoint(getattr(client, "url", None)) or "stashdb"
     shared_fingerprint.upsert(db, scene["id"], scene.get("title"), file["path"], file.get("duration"), provider, provider_scene_id,
-                              verdict["reason"], verdict["how"], shared_fingerprint.enrich(client, found, durations))
+                              verdict["reason"], verdict["how"], shared_fingerprint.enrich(client, exact, durations, near))
     history.add("warning", "history", "import", f"Fingerprint is not unique: {verdict['how']} -- look at it under Maintenance > Organize library > Shared fingerprints",
-                scene_id=str(scene["id"]), scene_title=scene.get("title"), details={"path": file["path"], "candidates": [f["id"] for f in found]}, dedupe_minutes=24 * 60)
+                scene_id=str(scene["id"]), scene_title=scene.get("title"), details={"path": file["path"], "candidates": [f["id"] for f in exact]}, dedupe_minutes=24 * 60)
 
 
 verification.shared_hook = _shared_fingerprint_hint
