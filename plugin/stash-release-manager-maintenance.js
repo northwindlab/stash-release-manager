@@ -1080,7 +1080,7 @@
           onClick: async () => {
             const res = await window.SRW.runOp('duration_check_ignore', { scene_id: x.scene_id, restore: wasDismissed });
             if (res.error) { rowStatus.textContent = ` error: ${res.error}`; return; }
-            findings = findings.filter((f) => f.scene_id !== x.scene_id); view.reset(); updateSummary();
+            findings = findings.filter((f) => f.scene_id !== x.scene_id); view.reload(); updateSummary();
             if (!wasDismissed) {
               window.SRW.dismissedNotice(`Dismissed: ${x.scene_title || 'scene'}`, 'Find it again with “show dismissed”.',
                 () => window.SRW.runOp('duration_check_ignore', { scene_id: x.scene_id, restore: true }), () => load());
@@ -2081,7 +2081,7 @@
         const rowStatus = el('span', { className: 'srw-key-status' });
         const r = results[x.id];
         const sdbLink = (m) => el('a', { href: `https://stashdb.org/scenes/${m.id}`, target: '_blank', rel: 'noopener noreferrer', textContent: `${m.title || m.id} ↗` });
-        const remove = () => { items = items.filter((i) => i.id !== x.id); view.reset(); updateSummary(); };
+        const remove = () => { items = items.filter((i) => i.id !== x.id); view.reload(); updateSummary(); };
         const review = window.SRW.iconButton('button', ['faFingerprint', 'faMagnifyingGlass'], 'Send to Identify Scene', {
           title: 'Adds the tag “Review: Identify Scene” (nothing else changes); the tools to identify it are there',
           onClick: async () => {
@@ -2186,7 +2186,7 @@
           Object.entries(res).forEach(([sid, one]) => { if (one.ok) { done += 1; delete results[sid]; items = items.filter((x) => x.id !== sid); } else failed += 1; });
         }
         status.textContent = ` ${done} assigned${failed ? `, ${failed} failed (see History)` : ''}`;
-        view.reset(); updateSummary();
+        view.reload(); updateSummary();
       }));
     const bulkReview = window.SRW.iconButton('button', ['faFingerprint', 'faMagnifyingGlass'], 'Send the shown ones to Identify Scene', {
       title: 'Adds the review tag to every scene the current search / filter shows' });
@@ -2201,7 +2201,7 @@
           const res = await window.SRW.runOp('compare_review_add', { scene_id: x.id });
           if (!res.error) items = items.filter((i) => i.id !== x.id);
         }
-        status.textContent = ' done'; view.reset(); updateSummary();
+        status.textContent = ' done'; view.reload(); updateSummary();
       });
     });
     const pane = el('div', {}, [
@@ -2222,13 +2222,28 @@
     let performers = [];
     let hideWatchlist = false;
     const wk = window.SRW.watchKind(watchSource); // the watchlist (eye) or Stash's favorites (heart), as Settings says
+    // Several cards at once (v0.243.20, tester's hint): a checkbox per card, "select this page", "select all N matching" (the search and the hide switch
+    // count), a bulk bar like the one of Upgrade wanted. Removing from the watchlist and deleting go one performer after the other.
+    const selected = new Set();
+    let pageIds = [];
+    const shownPerformers = () => {
+      const q = ((perfView.state && perfView.state.search) || '').trim().toLowerCase();
+      return performers.filter((p) => !(hideWatchlist && p.on_watchlist) && (!q || p.name.toLowerCase().includes(q)));
+    };
     const wkWord = watchSource === 'tag' ? 'watchlist' : 'favorites';
     const perfStatus = el('span', { className: 'srw-key-status' });
     // One card per performer (v0.238.3, like the Search page's): the picture, the name linking to Stash, a heart badge + accent frame for the ones on the
     // watchlist (a watchlist performer may well have no scene yet), and the actions: take it off the watchlist, or delete it from Stash.
     function buildCard(p) {
       const note = el('span', { className: 'srw-key-status' });
-      const card = el('div', { className: `srw-search-card srw-perf-card${p.on_watchlist ? ' srw-perf-card-watched' : ''}` });
+      const card = el('div', { className: `srw-search-card srw-perf-card${p.on_watchlist ? ' srw-perf-card-watched' : ''}${selected.has(p.id) ? ' srw-perf-card-selected' : ''}` });
+      const pick = el('input', { type: 'checkbox', className: 'srw-card-check', title: 'Select this performer', checked: selected.has(p.id) });
+      pick.addEventListener('change', () => {
+        if (pick.checked) selected.add(p.id); else selected.delete(p.id);
+        card.classList.toggle('srw-perf-card-selected', pick.checked);
+        syncSelection();
+      });
+      card.appendChild(pick);
       const img = p.image_path
         ? el('img', { className: 'srw-search-card-image', src: window.SRW.stashUrl(p.image_path), loading: 'lazy', alt: p.name })
         : el('div', { className: 'srw-search-card-image srw-search-card-noimage' });
@@ -2250,7 +2265,7 @@
               const res = await window.SRW.runOp('movies_performer_unwatch', { performer_id: p.id });
               if (res.error) { note.textContent = ` error: ${res.error}`; b.disabled = false; return; }
               p.on_watchlist = false;
-              perfView.reset(); updateSummary();
+              perfView.reload(); updateSummary();
             } catch (err) { note.textContent = ` error: ${err.message}`; b.disabled = false; }
           },
         }));
@@ -2264,7 +2279,8 @@
             const res = await window.SRW.runOp('movies_performer_delete', { performer_id: p.id });
             if (res.error) { note.textContent = ` error: ${res.error}`; return; }
             performers = performers.filter((x) => x.id !== p.id);
-            perfView.reset(); updateSummary();
+            selected.delete(p.id);
+            perfView.reload(); updateSummary(); syncSelection();
           }, { danger: true }),
       }));
       card.appendChild(el('div', { className: 'srw-search-card-actions' }, [...actions, note]));
@@ -2273,9 +2289,66 @@
     const perfView = window.SRW.buildFilteredPagedList({
       filters: ['search'], perPage: 48, emptyText: 'No performers without scenes.',
       fetchPage: window.SRW.localPageFetcher(() => performers.filter((p) => !(hideWatchlist && p.on_watchlist)), { text: (x) => x.name }),
-      renderItems: (page) => el('div', { className: 'srw-search-grid' }, page.map(buildCard)),
+      renderItems: (page) => { pageIds = page.map((p) => p.id); setTimeout(syncSelection, 0); return el('div', { className: 'srw-search-grid' }, page.map(buildCard)); },
     });
     const summary = el('p', { className: 'srw-hint' });
+    // ---- the bulk bar ----
+    const selCount = el('span', { className: 'srw-bulk-count' });
+    const bulk = el('div', { className: 'srw-bulk-bar', hidden: true });
+    const pageBox = el('input', { type: 'checkbox', title: 'Select / unselect everything on this page' });
+    pageBox.addEventListener('change', () => { pageIds.forEach((id) => (pageBox.checked ? selected.add(id) : selected.delete(id))); syncSelection(); perfView.reload(); });
+    const allLink = el('a', { href: '#', className: 'srw-bulk-all', onClick: (e) => { e.preventDefault(); shownPerformers().forEach((p) => selected.add(p.id)); syncSelection(); perfView.reload(); } });
+    const unwatchAllBtn = el('button', { type: 'button', className: 'srw-btn', textContent: wk.removeLabel,
+      title: `${wk.removeLabel} for the selected performers that are on it (they stay in Stash)` });
+    const deleteAllBtn = el('button', { type: 'button', className: 'srw-btn srw-btn-danger', textContent: 'Delete',
+      title: 'Delete the selected performers from Stash (only possible while a performer has no scene)' });
+    const clearBtn = el('button', { type: 'button', className: 'srw-btn', textContent: 'Clear selection', onClick: () => { selected.clear(); syncSelection(); perfView.reload(); } });
+    bulk.append(el('span', { className: 'srw-bulk-head' }, [selCount, allLink]), el('span', { className: 'srw-bulk-actions' }, [unwatchAllBtn, deleteAllBtn, clearBtn]));
+    const selectedPerformers = () => performers.filter((p) => selected.has(p.id));
+    function syncSelection() {
+      const matching = shownPerformers();
+      selCount.textContent = `${selected.size} selected`;
+      allLink.textContent = selected.size < matching.length ? `Select all ${matching.length} matching` : '';
+      bulk.hidden = selected.size === 0;
+      pageBox.checked = pageIds.length > 0 && pageIds.every((id) => selected.has(id));
+      const onList = selectedPerformers().filter((p) => p.on_watchlist).length;
+      unwatchAllBtn.disabled = !onList;
+      unwatchAllBtn.textContent = onList ? `${wk.removeLabel} (${onList})` : wk.removeLabel;
+      deleteAllBtn.textContent = `Delete (${selected.size})`;
+    }
+    // One request per performer, one after the other; a failing one stays selected and is counted.
+    async function runForSelected(list, op, done) {
+      let ok = 0; const errors = [];
+      for (let i = 0; i < list.length; i += 1) {
+        window.SRW.setBusy(perfStatus, `${i + 1} / ${list.length}…`);
+        try {
+          const res = await window.SRW.runOp(op, { performer_id: list[i].id });
+          if (res.error) errors.push(`${list[i].name}: ${res.error}`); else { ok += 1; done(list[i]); }
+        } catch (err) { errors.push(`${list[i].name}: ${err.message}`); }
+      }
+      perfStatus.textContent = '';
+      return { ok, errors };
+    }
+    unwatchAllBtn.addEventListener('click', (e) => {
+      const list = selectedPerformers().filter((p) => p.on_watchlist);
+      if (!list.length) return;
+      window.SRW.confirmInline(e.currentTarget, `${wk.removeLabel} for ${list.length} performer(s)? They stay in Stash.`, async () => {
+        const r = await runForSelected(list, 'movies_performer_unwatch', (p) => { p.on_watchlist = false; selected.delete(p.id); });
+        window.SRW.notify('Performers', `${r.ok} taken off the ${wkWord}${r.errors.length ? `, ${r.errors.length} failed (${r.errors[0]})` : ''}.`, r.errors.length ? 'info' : 'success');
+        perfView.reload(); updateSummary(); syncSelection();
+      });
+    });
+    deleteAllBtn.addEventListener('click', (e) => {
+      const list = selectedPerformers();
+      if (!list.length) return;
+      window.SRW.confirmInline(e.currentTarget, `Delete ${list.length} performer(s) from Stash${list.some((p) => p.on_watchlist) ? ' (and so from the watchlist)' : ''}? This cannot be undone.`, async () => {
+        const gone = new Set();
+        const r = await runForSelected(list, 'movies_performer_delete', (p) => { gone.add(p.id); selected.delete(p.id); });
+        performers = performers.filter((x) => !gone.has(x.id));
+        window.SRW.notify('Performers', `${r.ok} deleted${r.errors.length ? `, ${r.errors.length} failed (${r.errors[0]})` : ''}.`, r.errors.length ? 'info' : 'success');
+        perfView.reload(); updateSummary(); syncSelection();
+      }, { danger: true });
+    });
     function updateSummary() {
       summary.textContent = `${performers.length} performer(s) without scenes, ${performers.filter((p) => p.on_watchlist).length} of them on the ${wkWord} (marked with ${watchSource === 'tag' ? 'an eye' : 'a heart'}).`;
     }
@@ -2283,18 +2356,21 @@
       const r = await window.SRW.runOp('movies_performers_empty');
       if (r.error) { perfStatus.textContent = ` error: ${r.error}`; return false; }
       performers = r.performers || [];
+      [...selected].forEach((id) => { if (!performers.some((p) => p.id === id)) selected.delete(id); });
       perfView.reset();
-      updateSummary();
+      updateSummary(); syncSelection();
       return '';
     }
     const loader = autoLoader(perfStatus, loadPerformers);
-    const hideBox = el('input', { type: 'checkbox', checked: false, onChange: (e) => { hideWatchlist = e.target.checked; perfView.reset(); } });
+    const hideBox = el('input', { type: 'checkbox', checked: false, onChange: (e) => { hideWatchlist = e.target.checked; perfView.reset(); syncSelection(); } });
     const perfPane = el('div', {}, [
       el('div', { className: 'srw-toolbar' }, [
         window.SRW.iconButton('button', 'faRotate', 'Reload', { className: 'srw-btn', title: 'Reload: ask again, the list shown is a kept one', onClick: () => loader(true) }),
+        el('label', {}, [pageBox, ' select this page']),
         el('label', {}, [hideBox, ` hide the ones on the ${wkWord} (they are meant to have no scene yet)`]), perfStatus,
       ]),
       summary,
+      bulk,
       perfView.node,
     ]);
     loader(); // loads itself when the page opens
@@ -2333,7 +2409,7 @@
             const r = await window.SRW.runOp('movies_group_delete', { group_id: n.group.id });
             if (r.error) { rowStatus.textContent = ` error: ${r.error}`; return; }
             namesakes = namesakes.filter((x) => x.group.id !== n.group.id);
-            namesakeView.reset();
+            namesakeView.reload();
             namesakeStatus.textContent = ` "${r.name}" deleted`;
           }, { danger: true }) });
         // "Dismiss": it is another film with a similar name -- the pair stays hidden (the same table as "Not this"), with Undo.
@@ -2344,7 +2420,7 @@
             const r = await window.SRW.runOp('movies_group_namesakes_dismiss', { group_id: n.group.id, namesake_ids: ids });
             if (r.error) { rowStatus.textContent = ` error: ${r.error}`; return; }
             namesakes = namesakes.filter((x) => x.group.id !== n.group.id);
-            namesakeView.reset();
+            namesakeView.reload();
             window.SRW.dismissedNotice(`Dismissed: ${n.group.name}`, 'Not the same film as its namesake(s).',
               () => window.SRW.runOp('movies_group_namesakes_dismiss', { group_id: n.group.id, namesake_ids: ids, undo: true }), () => load());
           } });
@@ -2407,10 +2483,10 @@
               if (r.error) { rowStatus.textContent = ` error: ${r.error}`; return; }
               const at = p.candidates.indexOf(c);
               p.candidates.splice(at, 1);
-              if (!p.candidates.length) { pairs = pairs.filter((x) => x !== p); pairView.reset(); } else drawCandidates();
+              if (!p.candidates.length) { pairs = pairs.filter((x) => x !== p); pairView.reload(); } else drawCandidates();
               window.SRW.dismissedNotice(`Not this: ${c.group.name}`, `Not suggested again for "${p.title}".`,
                 () => window.SRW.runOp('movies_compare_groups_ignore', { folder_key: p.key, group_id: c.group.id, undo: true }),
-                () => { p.candidates.splice(at, 0, c); if (!pairs.includes(p)) pairs.push(p); pairView.reset(); drawCandidates(); });
+                () => { p.candidates.splice(at, 0, c); if (!pairs.includes(p)) pairs.push(p); pairView.reload(); drawCandidates(); });
             },
           });
           const notes = [`${Math.round(c.score * 100)} % alike`, c.note, c.year_note, c.group.date ? `group date ${c.group.date}` : 'group has no date'].filter(Boolean).join(' · ');
@@ -2663,7 +2739,7 @@
           const r = await window.SRW.runOp('films_library_apply', { film_ids: [v.film_id], force });
           const one = (r.applied || [])[0] || {};
           rowStatus.textContent = r.error ? ` error: ${r.error}` : (one.error ? ` error: ${one.error}` : ` ${one.status}`);
-          if (!r.error && !one.error) { libItems = libItems.filter((x) => x.film_id !== v.film_id); keepLibrary(); libView.reset(); }
+          if (!r.error && !one.error) { libItems = libItems.filter((x) => x.film_id !== v.film_id); keepLibrary(); libView.reload(); }
         };
         return el('li', { className: 'srw-release-item' }, [
           el('span', { className: 'srw-release-title', textContent: `${v.title}${v.year ? ` (${v.year})` : ''}` }),
@@ -2676,7 +2752,7 @@
             onClick: (e) => confirmInline(e.currentTarget, v.verdict === 'clear' ? `Use the existing file for "${v.title}"? Nothing is downloaded, moved or deleted.`
               : `The length does not fit. Use the existing file for "${v.title}" anyway? Nothing is downloaded, moved or deleted.`, () => act(v.verdict !== 'clear')) }),
           el('button', { className: 'srw-btn srw-btn-sm', textContent: 'Keep searching', title: 'The file is not good enough (e.g. 480p): the movie stays on the wishlist and leaves this list',
-            onClick: async () => { await window.SRW.runOp('films_library_keep', { id: v.film_id }); libItems = libItems.filter((x) => x.film_id !== v.film_id); keepLibrary(); libView.reset(); } }),
+            onClick: async () => { await window.SRW.runOp('films_library_keep', { id: v.film_id }); libItems = libItems.filter((x) => x.film_id !== v.film_id); keepLibrary(); libView.reload(); } }),
           rowStatus,
         ]);
       })),

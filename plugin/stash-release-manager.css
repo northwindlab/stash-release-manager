@@ -2334,3 +2334,8 @@ a.srw-btn { text-decoration: none; display: inline-block; text-align: center; }
 /* The list opened under a movie row (Activity > Import failed: Scenes) spans the whole row, and an empty one takes no row of its own (v0.243.13). */
 .srw-release-row > .srw-rr-slot { grid-column: 1 / -1; min-width: 0; white-space: normal; }
 .srw-release-row > .srw-rr-slot:empty { display: none; }
+
+/* Performers without scenes: a checkbox on every card (v0.243.20) and an accent frame for the selected ones. */
+.srw-perf-card { position: relative; }
+.srw-card-check { position: absolute; top: 1rem; left: 1rem; width: 1.25rem; height: 1.25rem; z-index: 2; cursor: pointer; accent-color: var(--primary, #137cbd); }
+.srw-perf-card-selected { outline: 2px solid var(--primary, #137cbd); outline-offset: -1px; }

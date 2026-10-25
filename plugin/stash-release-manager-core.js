@@ -11,7 +11,7 @@
   // rule and the bug it caused when this drifted). Change this if you
   // install under a different folder name.
   // Must equal `version:` in stash-release-manager.yml (scripts/test_plugin_version.py checks it).
-  const PLUGIN_VERSION = '0.243.18';
+  const PLUGIN_VERSION = '0.243.21';
   const PLUGIN_ID = 'stash-release-manager';
   const PLUGIN_NAME = 'StashReleaseManager';
 
@@ -464,6 +464,7 @@
 
   // ==================== DOM helpers ====================
 
+  const BOOLEAN_ATTRS = new Set(['disabled', 'hidden', 'readonly', 'required', 'selected', 'multiple', 'open', 'autofocus']);
   function el(tag, props = {}, children = []) {
     // Secret fields (API keys, passwords) are built as plain text inputs that are only DISPLAYED masked (.srw-secret, -webkit-text-security): a
     // type=password field makes Firefox offer to save it as a login, and autocomplete="off" is ignored there (v0.230.2).
@@ -477,6 +478,11 @@
       if (k === 'className') node.className = v;
       else if (k === 'textContent') node.textContent = v;
       else if (k.startsWith('on') && typeof v === 'function') node.addEventListener(k.slice(2).toLowerCase(), v);
+      // Boolean attributes (v0.243.20): setAttribute('disabled', false) writes the text "false", which still counts as SET -- a button built with
+      // `disabled: !providers.length` was disabled although the value was false. `checked` is the property, the others are left out when falsy.
+      else if (k === 'checked') node.checked = !!v;
+      else if (BOOLEAN_ATTRS.has(k) && !v) { /* not set */ }
+      else if (BOOLEAN_ATTRS.has(k)) node.setAttribute(k, '');
       else node.setAttribute(k, v);
     });
     if (secret) node.classList.add('srw-secret');
