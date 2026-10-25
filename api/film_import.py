@@ -163,7 +163,7 @@ def finalize(db, stash_client, film, movies, get_provider_client, force=False, c
         return _add_part(db, stash_client, film, ids, actual, movies, get_provider_client)
     if expected and actual and not force and abs(actual / expected - 1) > LENGTH_TOLERANCE:
         msg = (f"The file(s) are {actual:.0f} min, ThePornDB says {expected:.0f} min -- a different cut or the wrong movie. "
-               "Nothing was grouped; look at it (Open file in Stash), then 'Group anyway' or fix it by hand")
+               "Nothing was grouped; look at the files (the Scenes button lists them), then 'Group anyway' or fix it by hand")
         film_repo.update(db, film["id"], status="import_failed", import_error=msg)
         history.event("warning", "movies", f"{film['title']}: {msg}")
         return {"id": film["id"], "status": "import_failed", "actual": round(actual, 1), "expected": expected}
@@ -463,7 +463,7 @@ def discard(db, stash_client, film, recycle, to_local, dismiss=False):
     except Exception:  # noqa: BLE001
         logger.exception("movie discard: Stash clean for %s failed (the entries go with the next clean)", folders)
     rejected = [*film.get("rejected_titles", []), *([film["grabbed_title"]] if film.get("grabbed_title") else [])]
-    back = {"status": back["status"]}
+    back = {"status": "dismissed" if dismiss else "wanted"}
     if film.get("upgrading"):  # the owned file stays: back on the Upgrade list (or off it when the user dismisses)
         back = {"status": "imported", "upgrading": 0, "upgrade_wanted": 0 if dismiss else 1}
     film_repo.update(db, film["id"], **back, pending_import_path=None, import_error=None,

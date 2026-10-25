@@ -3,11 +3,11 @@ db.py's library_check_run/library_check_finding tables, added 2026-09-16)."""
 import json
 
 
-def create_run(db, scope_paths):
+def create_run(db, scope_paths, provider="stashdb"):
     with db.connect() as conn:
         cur = conn.execute(
-            "INSERT INTO library_check_run (scope_paths) VALUES (?)",
-            (json.dumps(scope_paths or []),),
+            "INSERT INTO library_check_run (scope_paths, provider) VALUES (?, ?)",
+            (json.dumps(scope_paths or []), provider or "stashdb"),
         )
         return cur.lastrowid
 
@@ -65,15 +65,16 @@ def insert_finding(db, run_id, scene_id, scene_title, kind, expected_stashdb_id=
 
 
 def list_findings(db, status="pending", kind=None):
-    query = "SELECT * FROM library_check_finding WHERE 1=1"
+    query = ("SELECT f.*, COALESCE(r.provider, 'stashdb') AS provider FROM library_check_finding f "
+             "LEFT JOIN library_check_run r ON r.id = f.run_id WHERE 1=1")
     params = []
     if status:
-        query += " AND status = ?"
+        query += " AND f.status = ?"
         params.append(status)
     if kind:
-        query += " AND kind = ?"
+        query += " AND f.kind = ?"
         params.append(kind)
-    query += " ORDER BY id DESC"
+    query += " ORDER BY f.id DESC"
     with db.connect() as conn:
         rows = conn.execute(query, params).fetchall()
         findings = []
@@ -111,3 +112,9 @@ def delete_finding(db, finding_id):
     pending / applied / failed / dismissed."""
     with db.connect() as conn:
         conn.execute("DELETE FROM library_check_finding WHERE id = ?", (finding_id,))
+
+
+def provider_of_finding(db, finding):
+    """The provider the run that made this finding asked ('stashdb' when unknown)."""
+    run = get_run(db, finding.get("run_id")) if finding.get("run_id") else None
+    return (run or {}).get("provider") or "stashdb"

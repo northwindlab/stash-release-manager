@@ -84,7 +84,7 @@
       const actions = el('div', { className: 'srw-toolbar' });
 
       // 1) StashDB scenes
-      actions.appendChild(el('button', { className: 'srw-btn srw-btn-primary', textContent: 'Check StashDB scenes',
+      actions.appendChild(window.SRW.iconButton('button', ['faMagnifyingGlass', 'faList'], 'Check StashDB scenes', { className: 'srw-btn srw-btn-primary',
         title: 'Is this movie on StashDB as scenes? One StashDB request; nothing is changed',
         onClick: async () => {
           checkSlot.innerHTML = '';

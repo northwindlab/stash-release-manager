@@ -4117,6 +4117,28 @@
         } },
       { key: 'whisparr', title: 'Whisparr', optional: true, intro: 'Optional: only if you want Whisparr to keep a second record. The program works without it.',
         build: () => buildWhisparrConnectionSection(settings, effective, secretPlaceholder, onFieldSaved) },
+      { key: 'userscript', title: 'Browser userscript', optional: true,
+        intro: 'Optional: a userscript adds buttons to StashDB\'s pages (scene, scene cards, performer and studio pages) so you can put a scene on the wishlist, search it or watch a performer / studio without leaving the site. The program works without it.',
+        build: async () => {
+          const { sidecarUrl } = await window.SRW.getSettings();
+          const scriptUrl = `${sidecarUrl}/userscript/srm.user.js`;
+          const link = el('a', { className: 'srw-btn srw-btn-primary', href: scriptUrl, target: '_blank', rel: 'noopener noreferrer', textContent: 'Install the userscript',
+            title: 'Opens the script; with a userscript manager installed it offers to install it' });
+          const copy = el('button', { type: 'button', className: 'srw-btn', textContent: 'Copy the address', title: scriptUrl,
+            onClick: async () => {
+              if (await window.SRW.copyText(scriptUrl)) notify('Userscript', 'Address copied.', 'success');
+              else notify('Userscript', 'Copying is blocked here -- select the address below and copy it by hand.', 'info');
+            } });
+          const steps = el('ol', { className: 'srw-hint' }, [
+            'Install a userscript manager in your browser: Tampermonkey or Violentmonkey (a browser extension).',
+            'Press "Install the userscript" (or open the address below in that browser). The manager shows the script: confirm the installation and allow the connection to the sidecar when it asks.',
+            'Open a StashDB scene: you get the chips "Stash" and "SRM" and the buttons Send to wishlist, Send and search now, Open in Stash and Copy Stash-ID. On a performer or studio page an eye button puts it on the watchlist (the crossed-out eye takes it off again).',
+            'Another stash-box from Settings > Connections works after you add an "// @match" line with its address to the script.',
+          ].map((t) => el('li', { textContent: t })));
+          return el('div', {}, [steps, el('div', { className: 'srw-toolbar' }, [link, copy]),
+            el('p', { className: 'srw-hint' }, ['Address: ', el('code', { textContent: scriptUrl, style: 'user-select: all' })]),
+            note('The browser must be able to reach this address. The script updates through the manager\'s update check; after an update of this program the sidecar has to be rebuilt for the script to change.')]);
+        } },
       { key: 'finish', title: 'Finish', intro: '', build: async () => {
           await refreshStatus();
           const list = el('ul', { className: 'srw-release-list' }, status.steps.map((x) => el('li', { className: 'srw-release-item' }, [
@@ -4124,6 +4146,12 @@
             el('span', { className: 'srw-hint', textContent: x.detail || '' }),
             x.done ? null : el('button', { className: 'srw-btn srw-btn-sm', textContent: 'Go to this step', onClick: () => show(Math.max(0, STEPS.findIndex((st) => st.key === x.key))) }),
           ])));
+          // Not part of the program's own status (a userscript cannot be seen from here): listed as an optional last item with a link to its step.
+          list.appendChild(el('li', { className: 'srw-release-item' }, [
+            el('span', { className: 'srw-release-title', textContent: '– Browser userscript' }),
+            el('span', { className: 'srw-hint', textContent: 'optional: buttons on StashDB\'s pages; how to install it is in this step' }),
+            el('button', { className: 'srw-btn srw-btn-sm', textContent: 'Go to this step', onClick: () => show(STEPS.findIndex((st) => st.key === 'userscript')) }),
+          ]));
           const go = el('button', { className: 'srw-btn srw-btn-primary', textContent: 'Run the first scan now' });
           if (!status.complete) go.disabled = true;
           const goStatus = el('span', { className: 'srw-key-status' });

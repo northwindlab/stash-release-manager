@@ -475,7 +475,7 @@ def _studio_name_for_naming(stash_client, stashdb_client, provider, provider_cli
     None = keep the provider's name. Best-effort.
     (Files already imported under another spelling are moved by the later
     bulk rename/move maintenance feature, not here.)"""
-    if provider == "stashdb":
+    if provider == "stashdb" or stashdb_client is None:
         return None
     studio = scene_detail.get("studio") or {}
     if not studio.get("name") and not studio.get("id"):

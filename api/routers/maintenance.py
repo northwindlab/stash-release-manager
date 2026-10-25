@@ -23,6 +23,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 import history
+import fingerprint_provider
 import library_check
 import library_check_repo
 import quality_profile_repo
@@ -351,18 +352,26 @@ def organize_check_file(body: dict):
     scene = stash.scene_for_fingerprint_check(scene_id) if scene_id else None
     if scene is None:
         raise HTTPException(status_code=404, detail="Stash has no scene with this id any more")
+    # The provider whose id the scene carries (StashDB first); a scene without any of the set-up providers' ids is looked up at the first one set up.
+    rows = _fingerprint_providers()
+    ids = {sid["endpoint"] for sid in scene["stash_ids"]}
+    row = next((r for r in rows if r["endpoint"] in ids), rows[0] if rows else None)
+    if row is None:
+        return {"result": "unverifiable", "message": "No metadata provider is set up (Settings > Connections)."}
+    lookup, row = _resolve_provider(row["key"])
+    name = row["name"]
     matches, mismatches, ambiguous, unverifiable = library_check.find_library_mismatches(
-        _get_stashdb_client(), [scene], stash.stashdb_endpoint, delay=0)
+        lookup, [scene], row["endpoint"], delay=0, provider_name=name)
     if matches:
-        return {"result": "match", "message": "StashDB has this file's fingerprints on the scene it is tagged with -- the tag is right. Press \"Check again\" to plan it."}
+        return {"result": "match", "message": f"{name} has this file's fingerprints on the scene it is tagged with -- the tag is right. Press \"Check again\" to plan it."}
     if mismatches:
         names = ", ".join(c.get("title") or c["id"] for c in mismatches[0]["found_as"])
-        return {"result": "mismatch", "message": f"StashDB identifies the file as another scene: {names}. The tag looks wrong -- fix it on the Fingerprint check page."}
+        return {"result": "mismatch", "message": f"{name} identifies the file as another scene: {names}. The tag looks wrong -- fix it on the Fingerprint check page."}
     if ambiguous:
-        return {"result": "ambiguous", "message": f"StashDB lists {len(ambiguous[0]['found_as'])} scenes for this file: "
+        return {"result": "ambiguous", "message": f"{name} lists {len(ambiguous[0]['found_as'])} scenes for this file: "
                 + ", ".join(c.get("title") or c["id"] for c in ambiguous[0]["found_as"])}
     reason = unverifiable[0]["reason"] if unverifiable else "unknown"
-    return {"result": "unverifiable", "message": f"StashDB cannot tell: {reason}."}
+    return {"result": "unverifiable", "message": f"{name} cannot tell: {reason}."}
 
 
 @router.get("/organize/movies/plan")
@@ -843,15 +852,30 @@ def directory_browse(path: str | None = None):
     return _get_stash_client().browse_directory(path)
 
 
-def _run_check(run_id, paths):
-    stash_client = _get_stash_client()
-    stashdb_client = _get_stashdb_client()
+def _fingerprint_providers():
+    import metadata_provider_repo
+    return fingerprint_provider.available(_get_stash_client(), _get_provider_client, metadata_provider_repo.list_all(_db, enabled_only=True))
+
+
+def _resolve_provider(key):
+    """(lookup client, provider row) for the Fingerprint check; HTTP 400 when that provider is not set up."""
+    import metadata_provider_repo
     try:
-        scenes = library_check.list_scenes_in_scope(stash_client, paths)
+        return fingerprint_provider.resolve(key, _get_stash_client(), _get_provider_client, metadata_provider_repo.list_all(_db, enabled_only=True))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+def _run_check(run_id, paths, provider="stashdb"):
+    stash_client = _get_stash_client()
+    try:
+        stashdb_client, prow = _resolve_provider(provider)
+        scenes = library_check.list_scenes_in_scope(stash_client, paths, prow["endpoint"])
         library_check_repo.update_run_progress(_db, run_id, 0, len(scenes))
         matches, mismatches, ambiguous, unverifiable = library_check.find_library_mismatches(
-            stashdb_client, scenes, stash_client.stashdb_endpoint,
+            stashdb_client, scenes, prow["endpoint"],
             progress_cb=lambda current, total: library_check_repo.update_run_progress(_db, run_id, current, total),
+            provider_name=prow["name"],
         )
         for m in mismatches:
             library_check_repo.insert_finding(
@@ -880,11 +904,23 @@ def _run_check(run_id, paths):
 @router.post("/library-check/run")
 def run_now(body: dict | None = None):
     paths = (body or {}).get("paths") or []
+    provider = (body or {}).get("provider") or "stashdb"
+    _resolve_provider(provider)
     if not _check_lock.acquire(blocking=False):
         return {"skipped": True, "reason": "a library check is already running"}
-    run_id = library_check_repo.create_run(_db, paths)
-    threading.Thread(target=_run_check, args=(run_id, paths), daemon=True).start()
+    run_id = library_check_repo.create_run(_db, paths, provider)
+    threading.Thread(target=_run_check, args=(run_id, paths, provider), daemon=True).start()
     return {"run_id": run_id}
+
+
+@router.get("/library-check/providers")
+def library_check_providers():
+    """The providers the Fingerprint check can ask (set up in Settings > Connections) and the one used last, which is the default. `batch` false =
+    asked one file at a time (ThePornDB): a whole-library run takes long, a single re-check does not."""
+    rows = _fingerprint_providers()
+    last = (library_check_repo.get_latest_run(_db) or {}).get("provider")
+    default = last if any(r["key"] == last for r in rows) else (rows[0]["key"] if rows else None)
+    return {"providers": rows, "default": default}
 
 
 @router.get("/library-check/status")
@@ -896,6 +932,7 @@ def status():
     return {
         "phase": phase,
         "run_id": run["id"],
+        "provider": run.get("provider") or "stashdb",
         "current": run["current"],
         "total": run["total"],
         "match_count": run["match_count"],
@@ -919,8 +956,11 @@ def apply_finding(finding_id: int):
         raise HTTPException(status_code=400, detail=f"finding is '{finding['kind']}', not an actionable mismatch")
     candidates = finding["candidates"]
     target_id = candidates[0]["id"]
+    provider = library_check_repo.provider_of_finding(_db, finding)
+    endpoint = None if provider == "stashdb" else _resolve_provider(provider)[1]["endpoint"]
     try:
-        result = library_check.apply_fix(_get_stash_client(), finding["scene_id"], target_id)
+        result = library_check.apply_fix(_get_stash_client(), finding["scene_id"], target_id, endpoint=endpoint,
+                                         keep_other_endpoints=endpoint is not None)
         library_check_repo.set_finding_status(_db, finding_id, "applied", applied_title=result["title"])
         return {"applied": True, "title": result["title"]}
     except Exception as e:
@@ -936,7 +976,8 @@ def recheck_finding(finding_id: int):
         raise HTTPException(status_code=404, detail="finding not found")
     if finding.get("status") != "pending":
         raise HTTPException(status_code=400, detail="only an open finding can be re-checked")
-    result = library_check.recheck_finding(_db, _get_stash_client(), _get_stashdb_client(), finding)
+    lookup, prow = _resolve_provider(library_check_repo.provider_of_finding(_db, finding))
+    result = library_check.recheck_finding(_db, _get_stash_client(), lookup, finding, endpoint=prow["endpoint"], provider_name=prow["name"])
     if result.get("error"):
         raise HTTPException(status_code=400, detail=result["error"])
     return result
@@ -958,20 +999,28 @@ def confirm_finding(finding_id: int, body: dict | None = None):
         if get_setting_value(_db, "fingerprint_upload_enabled", "false") != "true":
             raise HTTPException(status_code=400, detail="fingerprint upload is switched off (Settings > Schedule & Import)")
         stash_client = _get_stash_client()
+        prow = _resolve_provider(library_check_repo.provider_of_finding(_db, finding))[1]
+        if not prow["submit"]:
+            raise HTTPException(status_code=400, detail=f"{prow['name']} does not take fingerprints from Stash")
         scene = stash_client.scene_for_fingerprint_check(finding["scene_id"])
         if scene is None:
             raise HTTPException(status_code=400, detail="Stash has no scene with this id any more")
-        if not any(sid["endpoint"] == stash_client.stashdb_endpoint for sid in scene["stash_ids"]):
-            raise HTTPException(status_code=400, detail="the scene carries no StashDB id, there is nothing to submit the fingerprints to")
+        if not any(sid["endpoint"] == prow["endpoint"] for sid in scene["stash_ids"]):
+            raise HTTPException(status_code=400, detail=f"the scene carries no {prow['name']} id, there is nothing to submit the fingerprints to")
         try:
-            submitted = stash_client.submit_fingerprints(finding["scene_id"])
+            submitted = stash_client.submit_fingerprints(finding["scene_id"], prow["endpoint"])
         except Exception as e:
             logging.getLogger(__name__).exception("fingerprint submission for scene %s failed", finding["scene_id"])
             raise HTTPException(status_code=400, detail=f"submitting the fingerprints failed: {type(e).__name__}: {e}")
     library_check_repo.set_finding_status(_db, finding_id, "applied", applied_title="Confirmed by you")
     history.event("info", "maintenance", f"Fingerprint check: \"{finding.get('scene_title')}\" confirmed by the user"
-                  + (" and its fingerprints submitted to StashDB" if submitted else ""), details={"scene": finding.get("scene_id")})
+                  + (f" and its fingerprints submitted to {_fingerprint_provider_name(finding)}" if submitted else ""), details={"scene": finding.get("scene_id")})
     return {"ok": True, "submitted": submitted}
+
+
+def _fingerprint_provider_name(finding):
+    key = library_check_repo.provider_of_finding(_db, finding)
+    return next((r["name"] for r in _fingerprint_providers() if r["key"] == key), key)
 
 
 @router.post("/library-check/findings/{finding_id}/dismiss")

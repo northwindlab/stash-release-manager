@@ -688,6 +688,12 @@ upgrade_library_check_job = upgrade_library_check.UpgradeLibraryCheck(
     db, get_stash_client, duration_job, lambda k, d: get_setting_value(db, k, d), lambda: _cutoff_resolution())
 
 
+def _stashdb_or_none():
+    """StashDB's client, or None when no StashDB key is set (v0.243.2): the library tools then work with ThePornDB alone instead of failing on every StashDB call."""
+    client = get_stashdb_client()
+    return client if (client.session.headers.get("ApiKey") or "").strip() else None
+
+
 def _organizer():
     """Maintenance > Organize library (2026-09-28, library_organize.py)."""
     def setting(key):
@@ -697,7 +703,7 @@ def _organizer():
         theporndb_client = get_theporndb_client()
     except Exception:
         theporndb_client = None
-    return library_organize.Organizer(db, get_stash_client(), get_stashdb_client(), theporndb_client,
+    return library_organize.Organizer(db, get_stash_client(), _stashdb_or_none(), theporndb_client,
                                       _stash_path_to_local, setting, get_whisparr_client=get_whisparr_client)
 def _importer():
     """Maintenance > Import folder (2026-09-29, library_import.py)."""
@@ -708,7 +714,7 @@ def _importer():
         theporndb_client = get_theporndb_client()
     except Exception:
         theporndb_client = None
-    importer = library_import.Importer(db, get_stash_client(), get_stashdb_client(), theporndb_client,
+    importer = library_import.Importer(db, get_stash_client(), _stashdb_or_none(), theporndb_client,
                                        _stash_path_to_local, setting, get_whisparr_client=get_whisparr_client,
                                        recycle=_recycle_library_file)
     importer.backup_dir = os.path.join(settings.data_dir, "backups")

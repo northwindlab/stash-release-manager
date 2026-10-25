@@ -488,9 +488,10 @@ class SceneCompare:
                 "checks": {x["id"]: stored[x["id"]] for x in out if x["id"] in stored}}
 
     def unidentified_check(self, scene_ids):
-        """DRY RUN of the fingerprint assignment (nothing is written): StashDB's exact fingerprint lookup for these scenes (one request per 40;
-        ThePornDB is left to the per-scene tool in Review because its hash lookup is similarity-based). Result per scene:
-        unique (exactly one StashDB scene, no local scene holds it, no other checked scene wants it), ambiguous (several), held (another local
+        """DRY RUN of the fingerprint assignment (nothing is written): StashDB's exact fingerprint lookup for these scenes (one request per 40), and
+        ThePornDB's exact hashes (OSHASH / MD5 -- not its similarity-based PHASH, which stays with the per-scene tool in Review) for those StashDB does
+        not know or when no StashDB is set up (v0.243.2). Result per scene:
+        unique (exactly one provider scene, no local scene holds it, no other checked scene wants it), ambiguous (several), held (another local
         scene already has it), none. Stored in the table fingerprint_check for unidentified_apply(), which only applies what was seen here."""
         stash, imp = self.get_stash(), self.get_importer()
         scenes = []
@@ -499,31 +500,31 @@ class SceneCompare:
                                 {"id": str(sid)})["findScene"]
             if sc and not sc["stash_ids"] and sc["files"]:
                 scenes.append(sc)
-        pairs = []
-        for sc in scenes:
-            fps = [{"hash": x["value"], "algorithm": x["type"].upper()} for x in sc["files"][0]["fingerprints"] if x["type"] in ("oshash", "phash", "md5")]
-            pairs.append((sc, fps))
         results = {}
-        usable = [(sc, fps) for sc, fps in pairs if fps]
-        for sc, fps in pairs:
-            if not fps:
+        usable = []
+        for sc in scenes:
+            fps = [x for x in sc["files"][0]["fingerprints"] if x["type"] in ("oshash", "phash", "md5")]
+            if fps:
+                usable.append(sc)
+            else:
                 results[sc["id"]] = {"state": "none", "matches": [], "note": "no fingerprints"}
-        for i in range(0, len(usable), library_import._FP_BATCH):
-            chunk = usable[i:i + library_import._FP_BATCH]
-            matches = imp.stashdb.find_scenes_by_fingerprints([fps for _, fps in chunk])
-            for (sc, _), m in zip(chunk, matches):
-                m = m or []
-                entry = {"state": "none", "matches": [{"id": x["id"], "title": x.get("title")} for x in m]}
-                if len(m) > 1:
-                    entry["state"] = "ambiguous"
-                elif len(m) == 1:
-                    other = stash.find_scene_by_stashdb_id(m[0]["id"], stash.stashdb_endpoint)
-                    if other and str(other["id"]) != str(sc["id"]):
-                        entry.update(state="held", held_by=other["id"])
-                    else:
-                        entry["state"] = "unique"
-                results[sc["id"]] = entry
-            time.sleep(0.5)
+        # The importer's lookup: StashDB's exact lookup (one request per 40 files) when StashDB is set up, ThePornDB's for what StashDB does not know
+        # (or alone, v0.243.2). Each match keeps its provider so "Assign" puts the id on the right endpoint.
+        found = imp._identify(usable, exact_only=True) if usable else {}
+        for sc in usable:
+            hit = found.get(sc["files"][0]["id"]) or {"provider": "stashdb", "matches": []}
+            prov, m = hit["provider"], hit["matches"] or []
+            endpoint = stash.stashdb_endpoint if prov == "stashdb" else stash.theporndb_endpoint
+            entry = {"state": "none", "matches": [{"id": x["id"], "title": x.get("title"), "provider": prov} for x in m]}
+            if len(m) > 1:
+                entry["state"] = "ambiguous"
+            elif len(m) == 1:
+                other = stash.find_scene_by_stashdb_id(m[0]["id"], endpoint)
+                if other and str(other["id"]) != str(sc["id"]):
+                    entry.update(state="held", held_by=other["id"])
+                else:
+                    entry["state"] = "unique"
+            results[sc["id"]] = entry
         with _FP_LOCK:
             for sid, entry in results.items():
                 fp_put(self.db, sid, entry)
@@ -544,15 +545,17 @@ class SceneCompare:
                 out[sid] = {"error": "not a clear match in the last fingerprint check -- check it again"}
                 continue
             pid = e["matches"][0]["id"]
+            prov = e["matches"][0].get("provider") or "stashdb"
+            endpoint = stash.stashdb_endpoint if prov == "stashdb" else stash.theporndb_endpoint
             try:
                 full = self.scene(sid, with_provider=False)
                 if full.get("stash_ids"):
                     out[sid] = {"error": "the scene has a provider id meanwhile"}
                     continue
-                backup = self._backup(0, "before-fingerprint-assign", full, {"adopt": {"provider": "stashdb", "provider_id": pid}})
-                library_check.apply_fix(stash, sid, pid, create_missing_performers=True, endpoint=stash.stashdb_endpoint, keep_other_endpoints=True)
+                backup = self._backup(0, "before-fingerprint-assign", full, {"adopt": {"provider": prov, "provider_id": pid}})
+                library_check.apply_fix(stash, sid, pid, create_missing_performers=True, endpoint=endpoint, keep_other_endpoints=True)
                 after = self.scene(sid, with_provider=False)
-                history.add("info", "history", "compare", f"Scene identified by exact StashDB fingerprint: {pid[:8]}",
+                history.add("info", "history", "compare", f"Scene identified by exact {'StashDB' if prov == 'stashdb' else 'ThePornDB'} fingerprint: {pid[:8]}",
                             scene_id=sid, scene_title=after["title"], details={"provider_id": pid, "backup": backup})
                 with _FP_LOCK:
                     fp_delete(self.db, sid)

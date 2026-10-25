@@ -336,7 +336,7 @@ class Organizer:
     def _studio_folder_name(self, studio):
         stashdb_id = next((s["stash_id"] for s in studio.get("stash_ids") or []
                            if s["endpoint"] == self.stash.stashdb_endpoint), None)
-        if stashdb_id:
+        if stashdb_id and self.stashdb is not None:
             try:
                 return self.stashdb.get_studio_name(stashdb_id) or studio["name"]
             except Exception:
@@ -363,7 +363,9 @@ class Organizer:
         stashdb_pairs = []
         for scene, file in candidates:
             ids = {s["endpoint"]: s["stash_id"] for s in scene["stash_ids"]}
-            if self.stash.stashdb_endpoint in ids:
+            if self.stash.stashdb_endpoint in ids and self.stashdb is None:
+                result[file["id"]] = (False, "StashDB is not set up")
+            elif self.stash.stashdb_endpoint in ids:
                 stashdb_pairs.append((scene, file, ids[self.stash.stashdb_endpoint]))
             elif self.stash.theporndb_endpoint in ids and self.theporndb is not None:
                 result[file["id"]] = self._verify_by_phash(self.theporndb, ids[self.stash.theporndb_endpoint], file)

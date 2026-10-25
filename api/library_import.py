@@ -263,8 +263,9 @@ class Importer(Organizer):
                         "exists": os.path.isdir(self.to_local(root)), "signature": self.signature(mine)})
         return out
 
-    def _identify(self, scenes):
-        """{file_id: [{"id", "title"}]} -- StashDB's reverse lookup, exact fingerprints only."""
+    def _identify(self, scenes, exact_only=False):
+        """{file_id: {"provider", "matches"}} -- StashDB's reverse lookup, then ThePornDB's for what StashDB does not know. `exact_only` leaves out
+        ThePornDB's PHASH lookup (similarity-based): a bulk assignment must rest on exact hashes (v0.243.2)."""
         pairs = []
         for s in scenes:
             f = s["files"][0]
@@ -273,7 +274,7 @@ class Importer(Organizer):
             if fps:
                 pairs.append((f["id"], fps))
         found = {}
-        for i in range(0, len(pairs), _FP_BATCH):
+        for i in range(0, len(pairs) if self.stashdb is not None else 0, _FP_BATCH):  # no StashDB set up (ThePornDB only): straight to ThePornDB
             chunk = pairs[i:i + _FP_BATCH]
             try:
                 matches = self.stashdb.find_scenes_by_fingerprints([p[1] for p in chunk])
@@ -290,7 +291,7 @@ class Importer(Organizer):
                 if found.get(f["id"], {}).get("matches"):
                     continue
                 fp = {x["type"]: x["value"] for x in f["fingerprints"]}
-                for hash_type, key in (("OSHASH", "oshash"), ("PHASH", "phash")):
+                for hash_type, key in (("OSHASH", "oshash"),) if exact_only else (("OSHASH", "oshash"), ("PHASH", "phash")):
                     try:
                         m = _with_retry(self.theporndb.find_scenes_by_hash, fp.get(key), hash_type)
                     except Exception:
@@ -323,6 +324,8 @@ class Importer(Organizer):
         if key in cache:
             return cache[key]
         client = self.stashdb if provider == "stashdb" else self.theporndb
+        if client is None:
+            return None, None
         detail = _with_retry(client.get_scene_detail, sid)
         if not detail or not detail.get("title") or not detail.get("date"):
             return detail, None

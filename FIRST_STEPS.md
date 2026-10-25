@@ -23,7 +23,7 @@ Open **Release Manager** from the box icon in Stash's top bar (next to *Statisti
 
 ![Setup guide](docs/img/06-setup-guide.jpg)
 
-1. The steps: **Stash**, **StashDB**, ThePornDB (optional), **Search**, **Downloads**, **Quality**, Content & watchlist, Whisparr (optional), **Finish**.
+1. The steps: **Stash**, **StashDB**, ThePornDB (optional), **Search**, **Downloads**, **Quality**, Content & watchlist, Whisparr (optional), **Browser userscript** (optional: buttons on StashDB's pages, installed from the sidecar's address, see [INSTALL.md](INSTALL.md)), **Finish**.
 2. Each step has the same fields as the Settings pages. Enter the **URL** of the service ...
 3. ... and its **API key**, then press **Save** next to the field. Keys are stored in the sidecar's database and are never part of an export.
 
@@ -118,7 +118,7 @@ Maintenance is for your **existing** library. Nothing in it changes a file until
 
 ![Maintenance](docs/img/09-maintenance.jpg)
 
-1. **Check library**: *Fingerprint check* (files whose Stash tag does not match the file, by fingerprint; scenes StashDB cannot judge wait under *Needs manual review*), *Performers without scenes*, *Unidentified scenes* (scenes without a provider id), *VR: 2D / mono files* (the check's doubts about VR files; you say what a file is).
+1. **Check library**: *Fingerprint check* (files whose Stash tag does not match the file, by fingerprint, against the provider you have set up -- StashDB, ThePornDB or another stash-box; with several there is a *Check against* drop-down; scenes the provider cannot judge wait under *Needs manual review*), *Performers without scenes*, *Unidentified scenes* (scenes without a provider id), *VR: 2D / mono files* (the check's doubts about VR files; you say what a file is).
 2. **Resolve**: *Review: Identify Scene* (cases nobody could identify yet), *Compare scenes* (several versions of one scene).
 3. **Files & quality**: *Import folder* (files that were not downloaded here, e.g. an old collection), *Organize library* and *Upgrade wanted*.
 4. **Organize library** has two tabs: *Scenes by studio* (**Recount** checks every studio against StashDB once, in the background; **Details...** shows what would be renamed or moved, **Reload** checks it again; renaming returns at once and Stash scans in the background) and *Films vs. movie templates* (*Check films*).

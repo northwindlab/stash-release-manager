@@ -208,6 +208,8 @@ The worker asks the sidecar every 30 seconds for waiting encodes, encodes with t
 
 A userscript (Tampermonkey or Violentmonkey) adds buttons to StashDB's pages, so a scene can be put on the wishlist without leaving the site. The sidecar serves the script itself.
 
+The setup guide has an optional step *Browser userscript* with the address, a copy button and these instructions.
+
 1. Install the script from `<your sidecar address>/userscript/srm.user.js` (open that address in the browser with the userscript manager installed; the sidecar address is filled into the script). Allow the connection to the sidecar when the manager asks.
 2. On a **scene page** and on **scene cards** you get: *Send to wishlist* (searched by the schedule), *Send and search now*, *Open in Stash* (for every scene your Stash has, not only the wishlist) and *Copy Stash-ID*. On a card only a status dot shows until the pointer is on it. Two chips on a scene page: *Stash* (green = Stash has the scene) and *SRM* (the colour of the scene's state in the Release Calendar: green imported, purple on the wishlist, blue found by a scan, red import failed, grey dismissed).
 3. On a **performer or studio page**: the same two chips and an eye button. *Watch* puts the entry on the watchlist (it is created in Stash first when missing: the Favorite flag or the watchlist tag, as set in the plugin); the crossed-out eye takes it off again (only the mark is removed, nothing is deleted in Stash).
@@ -260,4 +262,5 @@ The switch is deliberately an environment variable and not a setting: settings t
 | "Source file missing" when importing, or an empty `/media` | The library mount was not ready when the container started: mount it, then `docker compose restart`. |
 | "Stale file handle" on an NFS library after the file server restarted | Stop the container, unmount and remount the share, start the container. |
 | StashDB / ThePornDB are not reachable although the network works | `docker compose restart` (the container keeps an old DNS answer). |
+| Videos stutter or reload every few seconds in Stash's player, and a short "media could not be loaded" message flashes first | Not this program: the browser cannot decode the file (often H.264 in a Chromium without proprietary codecs, e.g. Fedora's own Flatpak; the Flathub build or Firefox work), so Stash falls back to a live transcode on the server. In the player, choose *Direct stream* from the source menu to test; if it fails there, fix the browser's codecs. |
 | Nothing is downloaded | *Settings > Search & Quality*: backend and quality profile; *Activity* shows what each release is waiting for. |

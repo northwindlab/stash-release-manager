@@ -412,7 +412,9 @@ def main():
         # -- a full library check itself can take several minutes, but
         # this call doesn't wait for it, the frontend polls
         # maintenance_check_status instead.
-        result = _post(sidecar_url, "/maintenance/library-check/run", {"paths": args.get("paths") or []}, timeout=30)
+        result = _post(sidecar_url, "/maintenance/library-check/run", {"paths": args.get("paths") or [], "provider": args.get("provider") or "stashdb"}, timeout=30)
+    elif mode == "maintenance_check_providers":
+        result = _get(sidecar_url, "/maintenance/library-check/providers", timeout=30)
     elif mode == "maintenance_check_status":
         result = _get(sidecar_url, "/maintenance/library-check/status", timeout=15)
     elif mode == "maintenance_check_findings":

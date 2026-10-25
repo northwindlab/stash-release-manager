@@ -35,9 +35,9 @@ def local_fingerprints(scene):
     return fps
 
 
-def list_scenes_in_scope(stash_client, paths):
+def list_scenes_in_scope(stash_client, paths, endpoint=None):
     """Every local scene carrying a StashDB stash_id
-    (stash_client.all_scenes_with_stashdb_id(), one bulk local
+    (stash_client.all_scenes_with_stashdb_id(); `endpoint` = the provider's, None = StashDB, v0.243.0), one bulk local
     GraphQL call), optionally narrowed to scenes with at least one
     file under one of `paths` -- any directory (not just a configured
     top-level library path), picked via the same browse-and-add
@@ -46,7 +46,7 @@ def list_scenes_in_scope(stash_client, paths):
     filtering (the full library). A root is matched with a trailing
     separator added first so e.g. "/data/movies" doesn't also match
     "/data/moviesXYZ"."""
-    scenes = stash_client.all_scenes_with_stashdb_id()
+    scenes = stash_client.all_scenes_with_stashdb_id(endpoint)
     if not paths:
         return scenes
     roots = [p if p.endswith("/") else p + "/" for p in paths]
@@ -57,7 +57,7 @@ def list_scenes_in_scope(stash_client, paths):
 
 
 def find_library_mismatches(stashdb_client, scenes, stashdb_endpoint,
-                             batch_size=MAX_FINGERPRINT_BATCH, delay=0.5, progress_cb=None):
+                             batch_size=MAX_FINGERPRINT_BATCH, delay=0.5, progress_cb=None, provider_name="StashDB"):
     """The actual check: batches each in-scope scene's own local
     fingerprints through StashDB's reverse lookup
     (find_scenes_by_fingerprints()) and classifies against what that
@@ -104,7 +104,7 @@ def find_library_mismatches(stashdb_client, scenes, stashdb_endpoint,
             elif not found:
                 unverifiable.append({
                     "id": entry["id"], "title": entry["title"], "paths": entry["paths"],
-                    "reason": "StashDB has no fingerprint match at all for this file",
+                    "reason": f"{provider_name} has no fingerprint match at all for this file",
                 })
             elif len(found) == 1:
                 mismatches.append({
@@ -158,30 +158,30 @@ def apply_fix(stash_client, scene_id, expected_target_id, create_missing_perform
                                      keep_other_endpoints=keep_other_endpoints)
 
 
-def recheck_finding(db, stash_client, stashdb_client, finding):
-    """"Re-check fingerprints" on a "Needs manual review" finding (v0.238.0): asks StashDB again for what the scene's file(s) are -- someone may have
+def recheck_finding(db, stash_client, stashdb_client, finding, endpoint=None, provider_name="StashDB"):
+    """"Re-check fingerprints" on a "Needs manual review" finding (v0.238.0): asks the provider (StashDB unless the run used another, v0.243.0) again for what the scene's file(s) are -- someone may have
     registered fingerprints since the run -- and files the answer like a run would: a match closes the finding, one other scene makes it an
     auto-fixable mismatch, several scenes an ambiguous one, nothing leaves it unverifiable. Returns {"result", "message"} or {"error"}."""
     import library_check_repo
     scene = stash_client.scene_for_fingerprint_check(finding["scene_id"])
     if scene is None:
         return {"error": "Stash has no scene with this id any more"}
-    matches, mismatches, ambiguous, unverifiable = find_library_mismatches(stashdb_client, [scene], stash_client.stashdb_endpoint, delay=0)
+    matches, mismatches, ambiguous, unverifiable = find_library_mismatches(stashdb_client, [scene], endpoint or stash_client.stashdb_endpoint, delay=0, provider_name=provider_name)
     run_id = finding.get("run_id")
     if matches:
         library_check_repo.delete_finding(db, finding["id"])
-        return {"result": "verified", "message": "StashDB now has fingerprints that match this scene's id -- the finding is closed."}
+        return {"result": "verified", "message": f"{provider_name} now has fingerprints that match this scene's id -- the finding is closed."}
     if mismatches:
         m = mismatches[0]
         library_check_repo.insert_finding(db, run_id, m["id"], m["title"], "mismatch", expected_stashdb_id=m["expected_stashdb_id"],
                                           candidates=m["found_as"], file_paths=m["paths"])
         names = ", ".join(c.get("title") or c["id"] for c in m["found_as"])
-        return {"result": "mismatch", "message": f"StashDB now identifies the file as {names} -- it moved to the corrections list."}
+        return {"result": "mismatch", "message": f"{provider_name} now identifies the file as {names} -- it moved to the corrections list."}
     if ambiguous:
         a = ambiguous[0]
         library_check_repo.insert_finding(db, run_id, a["id"], a["title"], "ambiguous", expected_stashdb_id=a["expected_stashdb_id"],
                                           candidates=a["found_as"], file_paths=a["paths"])
-        return {"result": "ambiguous", "message": f"StashDB lists {len(a['found_as'])} scenes for this file: "
+        return {"result": "ambiguous", "message": f"{provider_name} lists {len(a['found_as'])} scenes for this file: "
                 + ", ".join(c.get("title") or c["id"] for c in a["found_as"])}
     u = unverifiable[0] if unverifiable else {"reason": "unknown"}
     return {"result": "unverifiable", "message": f"Still not verifiable: {u['reason']}."}

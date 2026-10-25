@@ -142,8 +142,10 @@
       }
       // Own query + Grab, the same panel as the scene wishlist (v0.109.0). The prefill is "Title Year" (film release names carry
       // title and year, not studio and date).
+      let manualSlot = null; // joined with "Search now" below, like the buttons of a scene row (v0.243.4)
       if (['wanted', 'import_failed'].includes(f.status) || viewKey(f) === 'upgrade') {
         const searchSlot = el('span', { className: 'srw-search-actions' });
+        manualSlot = searchSlot;
         window.SRW.getSearchCapabilities().then((caps) => {
           const sources = (caps && caps.manual_sources) || [];
           if (!sources.length) return;
@@ -155,7 +157,6 @@
             grabAsScene: f.status === 'wanted' ? (candidate) => window.SRW.runOp('films_grab', { id: f.id, candidate, as_scene: true }) : null,
           }));
         });
-        act.push(searchSlot);
       }
       if (f.status === 'wanted' && f.parts_imported) { // scenes were added with "Accept as one scene" (v0.221.0): done when all parts are in
         act.push(el('span', { className: 'srw-hint', textContent: `${f.parts_imported} part(s) in the group` }));
@@ -169,7 +170,7 @@
           } }));
       }
       if (f.status === 'wanted' || viewKey(f) === 'upgrade') { // the automatic search for this one movie, now (v0.128.0; an owned movie: a better version, v0.222.0): the result is a candidate in Activity > Needs review
-        act.push(window.SRW.iconButton('button', 'faMagnifyingGlass', 'Search now', {
+        const searchNowBtn = window.SRW.iconButton('button', 'faMagnifyingGlass', 'Search now', {
           title: viewKey(f) === 'upgrade' ? 'Search now: ask the indexers for a BETTER version of this movie (1-3 requests); a candidate waits in Activity > Needs review'
             : 'Search now: ask the indexers for this movie (1-3 requests); a plausible release becomes a candidate in Activity > Needs review',
           onClick: async (e) => {
@@ -181,8 +182,11 @@
             else notify('Movie search', res.result === 'no_match' ? `Nothing ${viewKey(f) === 'upgrade' ? 'better' : 'usable'} found (${(res.queries || []).join(' | ')}).`
               : (res.result === 'not_searched' ? res.reason : `Search failed: ${res.error || ''}`), 'info');
             await load();
-          } }));
+          } });
+        act.push(el('span', { className: 'srw-btn-group' }, [searchNowBtn, manualSlot].filter(Boolean)));
+        manualSlot = null;
       }
+      if (manualSlot) act.push(manualSlot); // no "Search now" (import failed): Manual alone
       // Phase 1b (v0.111.0): is the film on StashDB as SCENES ("<Series> N - Scene K")? One StashDB request per check, only on click;
       // the last result is kept on the film. At >= 80 % of the film's length the scenes can replace the one-file search.
       if (['suggested', 'wanted'].includes(f.status)) {
@@ -213,7 +217,7 @@
                     notify('Use scenes', `${res.scenes} scene(s) are on the scene wishlist (${res.new} new). The Group follows when all are imported.`, 'success');
                     await load();
                   }) }) : null,
-              el('button', { className: 'srw-btn', textContent: 'Check again', title: 'One StashDB request',
+              window.SRW.iconButton('button', 'faClipboardCheck', 'Check again', { className: 'srw-btn', title: 'Check again: one StashDB request',
                 onClick: () => runCheck() }),
               el('button', { className: 'srw-btn', textContent: 'Close', onClick: () => panel.remove() }),
             ]),
@@ -226,13 +230,13 @@
           f.stashdb = res;
           showCheck(res);
         };
-        act.push(el('button', { className: 'srw-btn', textContent: 'Check StashDB scenes',
+        act.push(window.SRW.iconButton('button', ['faMagnifyingGlass', 'faList'], 'Check StashDB scenes', { className: 'srw-btn',
           title: f.stashdb ? 'Show the last result (no request)' : 'Looks for this movie as scenes on StashDB (one request)',
           onClick: () => { if (li.querySelector('.srw-stashdb-check')) { li.querySelector('.srw-stashdb-check').remove(); return; }
             if (f.stashdb) showCheck(f.stashdb); else runCheck(); } }));
       }
       if (['suggested', 'wanted'].includes(f.status) && (!f.tpdb_id || f.match_class === 'unsure')) {
-        act.push(el('button', { className: 'srw-btn', textContent: 'Link movie…',
+        act.push(window.SRW.iconButton('button', 'faLink', 'Link movie…', { className: 'srw-btn',
           title: 'Pick the ThePornDB movie that belongs to this entry',
           onClick: () => {
             const old = li.querySelector('.srw-manual-search-panel');
@@ -284,7 +288,7 @@
           } }));
       }
       if (f.status === 'dismissed') {
-        act.push(el('button', { className: 'srw-btn', textContent: 'Restore', onClick: () => setStatus('wanted', `"${f.title}" is back on the wishlist.`) }));
+        act.push(window.SRW.iconButton('button', 'faRotateLeft', 'Restore', { className: 'srw-btn', title: 'Restore: back on the wishlist', onClick: () => setStatus('wanted', `"${f.title}" is back on the wishlist.`) }));
       }
       li = el('li', { className: f.tpdb_id ? 'srw-release-item srw-release-item-theporndb srw-film-row' : 'srw-release-item srw-film-row' }, [
         f.image_url ? mkLink(f.tpdb_url, el('img', { className: 'srw-film-thumb', src: f.image_url, loading: 'lazy', alt: '' }), 'Open this movie on ThePornDB (new tab)')
@@ -397,7 +401,7 @@
     function buildGroupRow(g) {
       let li = null;
       const closePanels = () => li.querySelectorAll('.srw-group-panel').forEach((n) => n.remove());
-      const checkBtn = el('button', { className: 'srw-btn', textContent: 'Check StashDB scenes',
+      const checkBtn = window.SRW.iconButton('button', ['faMagnifyingGlass', 'faList'], 'Check StashDB scenes', { className: 'srw-btn',
         title: 'Is this movie on StashDB as scenes? One StashDB request; nothing is changed',
         onClick: async () => {
           closePanels();
@@ -416,7 +420,7 @@
         } });
       // Assign the scenes by hand (v0.114.0): per local scene look at it (thumbnail + link to Stash), then pick one of the film's known StashDB
       // scenes, or -- if none is known -- give it a name yourself. The one StashDB request is made when the panel opens (cached per page).
-      const scenesBtn = el('button', { className: 'srw-btn srw-btn-primary', textContent: 'Scenes…',
+      const scenesBtn = window.SRW.iconButton('button', 'faList', 'Scenes…', { className: 'srw-btn srw-btn-primary',
         title: 'Look at each scene and assign it to a known StashDB scene of this movie, or name it yourself',
         onClick: async () => {
           if (li.querySelector('.srw-group-panel[data-kind="assign"]')) { closePanels(); return; }

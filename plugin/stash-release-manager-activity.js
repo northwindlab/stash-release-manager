@@ -465,8 +465,8 @@
       if (showFixWrongDownload && r.status === 'import_failed' && r.import_error_code !== 'fingerprint_mismatch') {
         const actStatus = el('span', { className: 'srw-key-status' });
         if (r.import_error_code === 'encode_failed') { // the download is still in place: encode it again instead of fetching a new one
-          li.push(el('button', {
-            className: 'srw-btn srw-btn-primary', textContent: 'Retry the encode',
+          li.push(window.SRW.iconButton('button', ['faRotateRight', 'faFilm'], 'Retry the encode', {
+            className: 'srw-btn srw-btn-primary',
             title: 'The downloaded file is still there: queue the re-encode again (it goes to the encode worker or the NAS as set in Settings > Quality)',
             onClick: async () => {
               const result = await window.SRW.runOp('releases_retry_encode', { provider: r.provider, scene_stashdb_id: r.scene_stashdb_id });
@@ -477,8 +477,8 @@
           }));
         }
         if (r.import_error_code !== 'scene_gone') {
-          li.push(el('button', {
-            className: 'srw-btn srw-btn-primary', textContent: 'Search again',
+          li.push(window.SRW.iconButton('button', 'faRotateRight', 'Search again', {
+            className: 'srw-btn srw-btn-primary',
             title: 'Back on the wishlist -- the next search run looks for it again',
             onClick: async () => {
               const result = await window.SRW.runOp('releases_retry_failed', {
@@ -633,7 +633,7 @@
   function movieRows(films, progressElements, container, { thumb = true } = {}) {
     const { el, notify, confirmInline } = window.SRW;
     return films.map((f) => {
-      const slot = el('div');
+      const slot = el('div', { className: 'srw-rr-slot' }); // the opened scene list: under the whole row (the row is a grid)
       const children = [
         thumb ? movieThumb(f) : null,
         el('span', { className: 'srw-release-title', textContent: `${f.title}${f.year ? ` (${f.year})` : ''}` }),
@@ -648,10 +648,11 @@
       } else if (f.status === 'grabbed' && f.mode === 'scenes') {
         children.push(el('span', { className: 'srw-hint', textContent: `Put together from StashDB scenes: ${f.scenes_imported || 0} of ${f.scenes_total || 0} imported` }));
       }
+      let searchNow = null; // joined with Manual below, like the buttons of a scene row (v0.243.4)
       if (f.status === 'wanted') { // searched by the automatic movie search without a usable result
         const why = { no_match: 'nothing usable found', rejected: 'the last candidate was rejected', error: 'the search failed' }[f.last_search_result] || 'searched';
         children.push(el('span', { className: 'srw-search-status', textContent: `${why}${f.last_search_at ? ` (${f.last_search_at.slice(0, 16)} UTC)` : ''}` }));
-        children.push(window.SRW.iconButton('button', 'faMagnifyingGlass', 'Search now', { title: 'Search now: ask the indexers for this movie again (1-3 requests)',
+        searchNow = window.SRW.iconButton('button', 'faMagnifyingGlass', 'Search now', { title: 'Search now: ask the indexers for this movie again (1-3 requests)',
           onClick: async (e) => {
             e.currentTarget.disabled = true;
             window.SRW.busyIcon(e.currentTarget);
@@ -660,7 +661,7 @@
               notify('Movie search', res.result === 'needs_review' ? `Candidate found: ${res.candidate.title}` : (res.result === 'no_match' ? 'Nothing usable found.' : `Search failed: ${res.error || ''}`), res.result === 'needs_review' ? 'success' : 'info');
             }
             render(container);
-          } }));
+          } });
       }
       // Own query + Grab (v0.211.1), the same panel as on the Movies page and for scenes; prefill "Title Year".
       let li = null;
@@ -675,26 +676,30 @@
             grab: (candidate) => window.SRW.runOp('films_grab', { id: f.id, candidate }),
           }));
         });
-        children.push(searchSlot);
+        children.push(searchNow ? el('span', { className: 'srw-btn-group' }, [searchNow, searchSlot]) : searchSlot);
+        searchNow = null;
       }
+      if (searchNow) children.push(searchNow);
       if (f.status === 'imported' && f.imported_at) children.push(el('span', { className: 'srw-release-date', textContent: `imported ${f.imported_at.slice(0, 16)}` }));
       if (f.import_error) children.push(el('span', { className: 'srw-hint', textContent: f.import_error }));
       if ((f.scenes || []).length) {
         let open = false;
-        children.push(el('button', { className: 'srw-btn', textContent: `Scenes (${f.scenes.length})`,
-          title: 'Open the files of this movie as Stash scenes to check that they belong together',
+        const scenesBtn = window.SRW.iconButton('button', 'faList', `Scenes (${f.scenes.length})`, { className: 'srw-btn',
+          title: `Scenes (${f.scenes.length}): open the files of this movie as Stash scenes to check that they belong together`,
           onClick: () => {
             open = !open;
             slot.replaceChildren(...(open ? [buildFilmScenes(f)] : []));
-          } }));
+          } });
+        scenesBtn.append(document.createTextNode(` ${f.scenes.length}`)); // the count stays visible
+        children.push(scenesBtn);
       }
       if (f.stash_group_id) {
         children.push(window.SRW.iconButton('a', 'faPlay', 'Open group', { href: `/groups/${f.stash_group_id}`, target: '_blank', rel: 'noopener noreferrer', title: 'Open group: the movie\'s group in Stash (new tab)' }));
       }
       if (f.status === 'wanted') children.push(...window.SRW.buildFilmDismissButtons(f, () => render(container))); // Stuck: get rid of a movie / group nobody wants
       if (f.status === 'import_failed') {
-        children.push(el('button', { className: 'srw-btn', textContent: 'Group anyway',
-          title: 'Build the Group from the files as they are, although the length does not fit',
+        children.push(window.SRW.iconButton('button', ['faLayerGroup', 'faExclamation'], 'Group anyway', { className: 'srw-btn',
+          title: 'Group anyway: build the Group from the files as they are, although the length does not fit',
           onClick: (e) => confirmInline(e.currentTarget, `Build the Group for "${f.title}" regardless of the length?`, async () => {
             const res = await window.SRW.runOp('films_finalize', { id: f.id, force: true });
             if (res.error) { notify('Movie', res.error, 'error'); return; }
@@ -710,10 +715,10 @@
             + (dismiss ? 'dismissed.' : 'the release is blocklisted for this movie and it is searched again.'), 'success');
           render(container);
         };
-        children.push(el('button', { className: 'srw-btn', textContent: 'Wrong movie: delete + search again',
+        children.push(el('button', { className: 'btn btn-outline-danger srw-btn-fit', textContent: 'Delete + search',
           title: 'The downloaded file(s) go to the recycle bin, their Stash scene(s) are removed, this release is never proposed again for this movie, and it is searched again',
           onClick: (e) => confirmInline(e.currentTarget, `Delete the downloaded file(s) of "${f.title}" (recycle bin) and search again?`, discard(false), { danger: true }) }));
-        children.push(el('button', { className: 'srw-btn srw-btn-danger', textContent: 'Delete + dismiss',
+        children.push(el('button', { className: 'btn btn-danger srw-btn-fit', textContent: 'Delete + dismiss',
           title: 'The downloaded file(s) go to the recycle bin, their Stash scene(s) are removed, and the movie is dismissed from the wishlist',
           onClick: (e) => confirmInline(e.currentTarget, `Delete the downloaded file(s) of "${f.title}" (recycle bin) and dismiss the movie?`, discard(true), { danger: true }) }));
       }
@@ -730,9 +735,10 @@
     if (!f.image_url) return null;
     const { el } = window.SRW;
     const img = el('img', { className: 'srw-release-thumb srw-movie-cover', src: f.image_url, alt: '', loading: 'lazy' });
+    // The cover opens the movie's Group in Stash; a movie without a Group (nothing was grouped yet) has nothing to open and says so (v0.243.16).
     const wrap = f.stash_group_id
-      ? el('a', { className: 'srw-release-thumb-link', href: `/groups/${f.stash_group_id}`, target: '_blank', rel: 'noopener noreferrer' }, [img])
-      : el('span', { className: 'srw-release-thumb-link' }, [img]);
+      ? el('a', { className: 'srw-release-thumb-link', href: `/groups/${f.stash_group_id}`, target: '_blank', rel: 'noopener noreferrer', title: 'Open the group in Stash (new tab)' }, [img])
+      : el('span', { className: 'srw-release-thumb-link', title: 'No group in Stash yet' }, [img]);
     img.addEventListener('error', () => wrap.remove());
     return wrap;
   }

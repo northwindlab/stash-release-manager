@@ -860,8 +860,8 @@
       }, { danger: !win.from });
     });
 
-    const refreshBtn = el('button', {
-      className: 'srw-btn srw-btn-sm', textContent: 'Refresh',
+    const refreshBtn = window.SRW.iconButton('button', 'faRotate', 'Reload', {
+      className: 'srw-btn srw-btn-sm',
       title: `Re-check ${window.SRW.providerLabel(provider)} for new years/scenes instead of using the cached overview`,
       onClick: () => loadYearOverview(pickerArea, provider, entityType, stashId, entityName, resultsArea, true),
     });

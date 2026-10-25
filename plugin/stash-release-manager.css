@@ -548,10 +548,10 @@
   color: #e57373;
 }
 
-.srw-btn-danger {
-  background: #c53030;
+.srw-btn.srw-btn-danger { /* (v0.243.14: with .srw-btn in the selector -- alone it lost against the later .srw-btn rule and every danger button was plain) */
+  background: rgb(219, 55, 55); /* Stash's own Delete red, like "Dismiss & Delete" */
   color: #fff;
-  border-color: #c53030;
+  border-color: rgb(219, 55, 55);
 }
 
 /* The plain "Dismiss" buttons (v0.213.11): a muted red so they are not mistaken for their neighbours, but quieter than
@@ -567,6 +567,7 @@
 .srw-btn-group > :last-child > .srw-btn:last-child, .srw-btn-group > .srw-btn:last-child { border-top-right-radius: 4px; border-bottom-right-radius: 4px; }
 .srw-btn-group .srw-btn:hover { position: relative; z-index: 1; }
 .srw-rr-actions .srw-btn-dismiss { margin-left: 0.8rem; }
+.srw-rr-actions .srw-btn-dismiss + .srw-btn-dismiss { margin-left: 0; } /* Dismiss and "Dismiss & Delete" are a pair: only the first stands apart (v0.243.12) */
 
 /* Dismiss buttons use Stash's own button classes (v0.235.8): "Dismiss" = btn-outline-danger, "Dismiss & Delete" = btn-danger, the same red as
    Stash's Delete button, so a theme that restyles them carries over. .srw-btn-fit gives them the size of the plugin's other buttons. */
@@ -1104,7 +1105,7 @@
   gap: 7px;
   margin: 0.5rem 0;
   padding: 7px;
-  background: rgb(25, 25, 25);
+  background: rgba(128, 128, 128, 0.14); /* neutral on every theme (was a fixed dark grey, v0.243.4) */
   border-radius: 4px;
 }
 
@@ -1124,15 +1125,12 @@
 }
 
 .srw-filter-bar .srw-btn {
-  background: rgba(0, 0, 0, 0.15);
-  border: 1px solid rgb(85, 85, 85);
+  /* Stash's own secondary button (measured by applyThemeColors in core.js), the old fixed dark values are the fallback */
+  background: var(--srw-btn-bg, rgba(0, 0, 0, 0.15));
+  border: 1px solid var(--srw-btn-border, rgb(85, 85, 85));
   border-radius: 3.5px;
-  color: rgba(255, 255, 255, 0.65);
+  color: var(--srw-btn-fg, rgba(255, 255, 255, 0.65));
   padding: 5.25px 10.5px;
-}
-
-.srw-filter-bar .srw-btn:hover {
-  color: #fff;
 }
 
 /* The active filter keeps this plugin's own accent-highlight
@@ -1747,6 +1745,15 @@
   text-align: center;
 }
 .srw-activity-badge[hidden], .srw-nav-dot[hidden] { display: none; }
+/* Numbers behind the side menu links: never squeezed by a long label (a 3-4 digit number broke out of the pill), digits centered, kept at the right edge. */
+.srw-sidenav .nav-link { gap: 0.45em; }
+.srw-sidenav .srw-icon { margin-right: 0; }
+.srw-sidenav-badge {
+  display: inline-flex; align-items: center; justify-content: center;
+  flex: 0 0 auto; box-sizing: border-box; min-width: 2em; margin-left: auto; padding: 0 0.55em;
+  white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+.srw-sidenav .nav-link.active .srw-sidenav-badge { background: rgba(255, 255, 255, 0.25); }
 /* Plugin icon among Stash's utility icons (MainNavBar.UtilityItems): no drop-down caret, the activity dot sits on the icon. */
 .srw-safety-error { color: #f85149; }
 .srw-safety-warning { color: #d29922; }
@@ -2294,3 +2301,36 @@ a.srw-btn { text-decoration: none; display: inline-block; text-align: center; }
 
 /* The result text of a card's button keeps its line even while empty (v0.240.19), so the button does not move up when the text appears. */
 .srw-search-card-actions .srw-key-status { min-height: 1.4em; }
+
+/* Dropdowns show an arrow (v0.242.3, tester): Stash's theme sets appearance:none on selects, so nothing marked them as a drop-down. The chevron is drawn
+   from two gradients in the text color (currentColor), with room on the right so a long label never runs under it. */
+#srw-plugin-root select, #srw-releases-pane select, .srw-modal select, .srw-settings-section select, .srw-filter-preset-select,
+#srw-plugin-root .srw-filter-select, .srw-modal .srw-filter-select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: calc(100% - 0.85rem) 50%, calc(100% - 0.55rem) 50%;
+  background-size: 0.3rem 0.3rem, 0.3rem 0.3rem;
+  background-repeat: no-repeat;
+  padding-right: 1.6rem;
+  cursor: pointer;
+}
+#srw-plugin-root select:disabled, #srw-releases-pane select:disabled, .srw-modal select:disabled, .srw-settings-section select:disabled { cursor: not-allowed; }
+
+/* Every button reacts to the mouse (v0.242.3, tester): plain buttons get a tint and a firmer border, solid ones (primary, danger, Whisparr) get lighter. */
+.srw-btn { transition: background-color 0.12s, border-color 0.12s, filter 0.12s; }
+.srw-btn:not(.srw-btn-primary):not(.srw-btn-danger):not(.srw-btn-whisparr):hover:not(:disabled),
+.srw-btn:not(.srw-btn-primary):not(.srw-btn-danger):not(.srw-btn-whisparr):focus-visible:not(:disabled) {
+  background-color: rgba(128, 128, 128, 0.22);
+  border-color: rgba(128, 128, 128, 0.85);
+}
+.srw-btn-primary:hover:not(:disabled), .srw-btn-danger:hover:not(:disabled), .srw-btn-whisparr:hover:not(:disabled),
+.srw-btn-primary:focus-visible:not(:disabled), .srw-btn-danger:focus-visible:not(:disabled), .srw-btn-whisparr:focus-visible:not(:disabled) { filter: brightness(1.18); }
+.srw-btn:active:not(:disabled) { filter: brightness(0.92); }
+
+/* The Search now / Manual search buttons of a movie row are one joined group like the ones of a scene row (v0.243.4): the wrapper that holds the Manual button takes no box of its own. */
+.srw-btn-group > .srw-search-actions { display: contents; }
+
+/* The list opened under a movie row (Activity > Import failed: Scenes) spans the whole row, and an empty one takes no row of its own (v0.243.13). */
+.srw-release-row > .srw-rr-slot { grid-column: 1 / -1; min-width: 0; white-space: normal; }
+.srw-release-row > .srw-rr-slot:empty { display: none; }

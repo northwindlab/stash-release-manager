@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "api"))
 os.environ["DATA_DIR"] = tempfile.mkdtemp()
 
 import library_check  # noqa: E402
+import library_import  # noqa: E402
 import scene_compare  # noqa: E402
 from db import Database  # noqa: E402
 
@@ -63,8 +64,14 @@ class StashDB:
         return out
 
 
+def importer(stashdb, theporndb=None):  # the real Importer._identify, built without its constructor
+    imp = library_import.Importer.__new__(library_import.Importer)
+    imp.stashdb, imp.theporndb = stashdb, theporndb
+    return imp
+library_import.time.sleep = lambda s: None
+
 DB = Database(os.path.join(tempfile.mkdtemp(), "t.sqlite3"))
-comp = scene_compare.SceneCompare(DB, lambda: Stash(), lambda p: None, tempfile.mkdtemp(), get_importer=lambda: SimpleNamespace(stashdb=StashDB()))
+comp = scene_compare.SceneCompare(DB, lambda: Stash(), lambda p: None, tempfile.mkdtemp(), get_importer=lambda: importer(StashDB()))
 comp.scene = lambda sid, with_provider=False: {"id": sid, "title": "Adopted", "date": "2011-01-28", "stash_ids": []}
 def fake_apply_fix(stash, sid, pid, **kw): CALLS["adopted"].append((sid, pid))  # noqa: E302
 library_check.apply_fix = fake_apply_fix
@@ -83,7 +90,7 @@ check("check: held by another local scene = held", r["4"]["state"] == "held" and
 check("check: alone so far, 5 is unique", r["5"]["state"] == "unique")
 r6 = comp.unidentified_check(["6"])
 check("check: two scenes wanting the same match = shared, neither unique (even across two calls)", r6["6"]["state"] == "shared" and r6["6"]["shared_with"] == ["5"])
-comp2 = scene_compare.SceneCompare(DB, lambda: Stash(), lambda p: None, comp.data_dir, get_importer=lambda: SimpleNamespace(stashdb=StashDB()))  # a "new request" / a reload
+comp2 = scene_compare.SceneCompare(DB, lambda: Stash(), lambda p: None, comp.data_dir, get_importer=lambda: importer(StashDB()))  # a "new request" / a reload
 checks = comp2.unidentified_list()["checks"]
 check("list: the stored results come back with the list (reload / restart)", checks["1"]["state"] == "unique" and checks["5"]["state"] == "shared" and checks["2"]["state"] == "ambiguous")
 check("check: a scene that has an id meanwhile is not looked up", "10" not in r)
@@ -110,3 +117,26 @@ r = comp.adopt(5, "21", "stashdb", "S21")
 check("adopt inside a compare pair does not touch the review tag", r.get("ok") and not r.get("review_closed") and len(TAG["removed"]) == 1)
 print("\nALL OK" if not FAILS else f"\n{len(FAILS)} FAILED")
 sys.exit(1 if FAILS else 0)
+
+
+# ThePornDB only (v0.243.2): no StashDB set up -> exact hashes at ThePornDB, never its similarity-based PHASH, the id goes on ThePornDB's endpoint
+class TPDB:
+    asked = []
+    def find_scenes_by_hash(self, h, t):
+        TPDB.asked.append(t)
+        return [{"id": "T20", "title": "Twenty"}] if (h, t) == ("h1", "OSHASH") else []
+CALLS["adopted"].clear()
+comp3 = scene_compare.SceneCompare(Database(os.path.join(tempfile.mkdtemp(), "t3.sqlite3")), lambda: Stash(), lambda p: None, tempfile.mkdtemp(),
+                                   get_importer=lambda: importer(None, TPDB()))
+comp3.scene = comp.scene
+comp3._backup = lambda *a, **k: "/tmp/x.jsonl"
+captured = {}
+def capture(stash, sid, pid, **kw): captured.update(sid=sid, pid=pid, endpoint=kw.get("endpoint"))  # noqa: E302
+library_check.apply_fix = capture
+t = comp3.unidentified_check(["1", "3"])
+check("ThePornDB only: an exact oshash hit is a clear match, with its provider", t["1"]["state"] == "unique" and t["1"]["matches"][0]["provider"] == "theporndb")
+check("ThePornDB only: no hit = none", t["3"]["state"] == "none")
+check("ThePornDB only: PHASH is never asked", "PHASH" not in TPDB.asked and "OSHASH" in TPDB.asked)
+comp3.unidentified_apply(["1"])
+check("ThePornDB only: the id is put on ThePornDB's endpoint", captured.get("endpoint") == Stash.theporndb_endpoint and captured.get("pid") == "T20")
+print("\nALL OK" if not FAILS else f"\n{len(FAILS)} FAILED")

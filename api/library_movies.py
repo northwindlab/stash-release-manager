@@ -18,6 +18,7 @@ import os
 import re
 import time
 from collections import defaultdict
+from urllib.parse import urlsplit
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,12 @@ query { findGroups(filter: {per_page: -1}) { groups { id name date scene_count }
 _GROUPS_QUERY = """
 query { findGroups(filter: {per_page: -1}) { groups { id name date scene_count scenes { id files { id } } } } }
 """
+
+
+def _local_path(url):
+    """Stash hands out picture links with the address the sidecar reaches it by (an internal host). The browser must load them from the address
+    it opened Stash with, so only the path and query are kept: /performer/12/image?t=...."""
+    return urlsplit(url)._replace(scheme="", netloc="").geturl() if isinstance(url, str) and url.startswith(("http://", "https://")) else url
 
 
 class Movies:
@@ -397,7 +404,7 @@ class Movies:
         for p in self.stash._graphql(_PERFORMERS_QUERY, {})["findPerformers"]["performers"]:
             tags = [t["name"] for t in p["tags"]]
             rows.append({"id": p["id"], "name": p["name"], "disambiguation": p.get("disambiguation") or "",
-                         "favorite": p["favorite"], "image_path": p.get("image_path"),
+                         "favorite": p["favorite"], "image_path": _local_path(p.get("image_path")),
                          "on_watchlist": (wl_name in tags) if tag_mode else bool(p["favorite"])})
         rows.sort(key=lambda r: r["name"].lower())
         return rows

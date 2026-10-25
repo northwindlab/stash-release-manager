@@ -200,16 +200,44 @@
 
   async function renderLibraryCheck(content) {
     const { el } = window.SRW;
-    content.appendChild(el('h3', { textContent: 'Fingerprint check: wrong StashDB IDs' }));
-    content.appendChild(el('p', {
-      className: 'srw-hint',
-      textContent: 'Compares the fingerprints of your files with the ones StashDB has registered and finds scenes whose StashDB ID is wrong '
-        + '-- a local scene pointing at the wrong StashDB scene -- and says what the file really is. A wrong ID can be corrected here (title, '
+    let providers = [];
+    let defaultProvider = 'stashdb';
+    try {
+      const pr = await window.SRW.runOp('maintenance_check_providers');
+      providers = pr.providers || [];
+      defaultProvider = pr.default || 'stashdb';
+    } catch (e) { providers = [{ key: 'stashdb', name: 'StashDB', batch: true, submit: true }]; } // an older sidecar: StashDB as before
+    fpProviders = Object.fromEntries(providers.map((p) => [p.key, p]));
+    const providerSelect = el('select', { className: 'srw-filter-select', title: 'The metadata provider whose fingerprints your files are compared with' },
+      providers.map((p) => el('option', { value: p.key, textContent: p.name })));
+    providerSelect.value = defaultProvider;
+    const chosen = () => fpProviders[providerSelect.value] || { key: 'stashdb', name: 'StashDB', batch: true };
+    const heading = el('h3');
+    const hint = el('p', { className: 'srw-hint' });
+    const slowNote = el('p', { className: 'srw-hint', hidden: true });
+    const fillTexts = () => {
+      const n = chosen().name;
+      // With several providers the drop-down names the one in use, the heading stays neutral (the findings below can come from either).
+      heading.textContent = providers.length > 1 ? 'Fingerprint check: wrong scene IDs' : `Fingerprint check: wrong ${n} IDs`;
+      hint.textContent = `Compares the fingerprints of your files with the ones ${n} has registered and finds scenes whose ${n} ID is wrong `
+        + `-- a local scene pointing at the wrong ${n} scene -- and says what the file really is. A wrong ID can be corrected here (title, `
         + 'date, performers, studio and tags are taken over from the right scene); files and Whisparr are never touched. '
-        + 'Scenes StashDB cannot judge (no fingerprints registered yet, or several candidates) are listed under "Needs manual review".',
-    }));
+        + `Scenes ${n} cannot judge (no fingerprints registered yet, or several candidates) are listed under "Needs manual review".`;
+      slowNote.hidden = chosen().batch !== false;
+      slowNote.textContent = `${n} is asked one file at a time, so a check of the whole library takes long (about one request per second per file). `
+        + 'Pick directories below to check a part, or re-check single scenes from "Needs manual review".';
+    };
+    fillTexts();
+    providerSelect.addEventListener('change', fillTexts);
+    content.appendChild(heading);
+    if (providers.length > 1) content.appendChild(el('div', { className: 'srw-toolbar' }, [el('span', { textContent: 'Check against:' }), providerSelect]));
+    content.appendChild(hint);
+    content.appendChild(slowNote);
+    if (!providers.length) {
+      content.appendChild(el('p', { className: 'srw-release-mismatch-warning', textContent: 'No metadata provider is set up. Add StashDB, ThePornDB or another stash-box under Settings > Connections.' }));
+    }
 
-    const startBtn = el('button', { className: 'srw-btn srw-btn-primary', textContent: 'Start fingerprint check' });
+    const startBtn = el('button', { className: 'srw-btn srw-btn-primary', textContent: 'Start fingerprint check', disabled: !providers.length });
     const progressWrap = el('div', { className: 'srw-maintenance-progress' });
     const resultsWrap = el('div', { className: 'srw-maintenance-results' });
 
@@ -224,7 +252,7 @@
       startBtn.disabled = true;
       resultsWrap.innerHTML = '';
       try {
-        const started = await window.SRW.runOp('maintenance_check_run', { paths: scopedPaths });
+        const started = await window.SRW.runOp('maintenance_check_run', { paths: scopedPaths, provider: providerSelect.value });
         if (started.skipped) {
           progressWrap.innerHTML = '';
           progressWrap.appendChild(el('span', { className: 'srw-hint', textContent: started.reason || 'A check is already running.' }));
@@ -448,6 +476,8 @@
   // totals (see renderProgress()'s docstring above), so the caller can
   // reconcile the progress summary with what this function just
   // rendered.
+  let fpProviders = {}; // Fingerprint check: provider key -> {key, name, batch, submit}, set by renderLibraryCheck()
+  const fpName = (key) => (fpProviders[key || 'stashdb'] || {}).name || (key === 'theporndb' ? 'ThePornDB' : 'StashDB');
   let uploadEnabled = false; // Settings > fingerprint_upload_enabled, set by renderFindings(), read by the Needs-manual-review rows
   async function renderFindings(resultsWrap) {
     const { el } = window.SRW;
@@ -590,7 +620,7 @@
   function runApplySelected(mismatches, applyBtn, resultsWrap) {
     const ids = Array.from(selectedIds);
     window.SRW.confirmInline(applyBtn,
-      `Correct ${ids.length} scene(s)? Each one's title/date/details/studio/performers/tags and StashDB id `
+      `Correct ${ids.length} scene(s)? Each one's title/date/details/studio/performers/tags and provider id `
       + `will be overwritten with the matched scene's own data. This only ever changes local Stash metadata `
       + `-- never a file on disk or Whisparr.`,
       async () => {
@@ -656,11 +686,11 @@
       // the finding, one other scene makes it a correction, the result is written under the row.
       const note = el('div', { className: 'srw-key-status srw-finding-note' });
       const recheckBtn = window.SRW.iconButton('button', 'faFingerprint', 'Re-check fingerprints', {
-        title: 'Ask StashDB again what this file is (fingerprints may have been registered since the check ran)',
+        title: `Ask ${fpName(f.provider)} again what this file is (fingerprints may have been registered since the check ran)`,
         onClick: async (e) => {
           const b = e.currentTarget;
           b.disabled = true;
-          window.SRW.setBusy(note, 'asking StashDB…');
+          window.SRW.setBusy(note, `asking ${fpName(f.provider)}…`);
           try {
             const res = await window.SRW.runOp('maintenance_check_recheck', { finding_id: f.id });
             if (res.error) { note.textContent = ` error: ${res.error}`; return; }
@@ -684,18 +714,19 @@
         window.SRW.setBusy(note, submit ? 'submitting…' : 'applying…');
         const res = await window.SRW.runOp('maintenance_check_confirm', { finding_id: f.id, submit });
         if (res.error) { note.textContent = ` error: ${res.error}`; window.SRW.notify('File is correct', res.error, 'error'); return; }
-        window.SRW.notify('File is correct', submit ? `"${f.scene_title}" is confirmed and its fingerprints were submitted to StashDB.`
+        window.SRW.notify('File is correct', submit ? `"${f.scene_title}" is confirmed and its fingerprints were submitted to ${fpName(f.provider)}.`
           : `"${f.scene_title}" is confirmed.`, 'success');
         await renderFindings(resultsWrap);
       };
       const confirmBtn = noMatch ? window.SRW.iconButton('button', 'faCheck', 'File is correct', {
-        title: 'The scene\'s StashDB id is right (nobody registered a fingerprint for this file): close the finding',
+        title: `The scene's ${fpName(f.provider)} id is right (nobody registered a fingerprint for this file): close the finding`,
         onClick: (e) => window.SRW.confirmInline(e.currentTarget, `Mark "${f.scene_title}" as correct and close the finding?`, confirmOp(false)),
       }) : null;
-      const submitBtn = noMatch && uploadEnabled ? window.SRW.iconButton('button', 'faCloudArrowUp', 'Correct + submit to StashDB', {
-        title: 'Like "File is correct", and the fingerprints of the file are submitted to StashDB (public, cannot be undone)',
+      const canSubmit = (fpProviders[f.provider || 'stashdb'] || { submit: true }).submit;
+      const submitBtn = noMatch && uploadEnabled && canSubmit ? window.SRW.iconButton('button', 'faCloudArrowUp', `Correct + submit to ${fpName(f.provider)}`, {
+        title: `Like "File is correct", and the fingerprints of the file are submitted to ${fpName(f.provider)} (public, cannot be undone)`,
         onClick: (e) => window.SRW.confirmInline(e.currentTarget,
-          `Mark "${f.scene_title}" as correct AND submit its fingerprints to StashDB? That is public and cannot be undone.`, confirmOp(true), { danger: true }),
+          `Mark "${f.scene_title}" as correct AND submit its fingerprints to ${fpName(f.provider)}? That is public and cannot be undone.`, confirmOp(true), { danger: true }),
       }) : null;
       const pathLines = (f.file_paths || []).map((p) => el('div', { className: 'srw-maintenance-file-path', textContent: p }));
       return el('li', { className: 'srw-release-item' }, [
@@ -926,8 +957,8 @@
             () => window.SRW.runOp('compare_review_done', { scene_id: f.scene_id }), null);
         },
       });
-      const restoreBtn = el('button', {
-        className: 'srw-btn srw-btn-sm srw-btn-primary', textContent: 'Restore',
+      const restoreBtn = window.SRW.iconButton('button', 'faRotateLeft', 'Restore', {
+        className: 'srw-btn srw-btn-sm srw-btn-primary',
         title: 'Back to the findings (the file is judged as a finding again)',
         onClick: async () => {
           const r = await window.SRW.runOp('vr_check_restore', { finding_id: f.id, status: 'pending' });
@@ -1144,7 +1175,7 @@
       renderItems: (page) => el('ul', { className: 'srw-release-list' }, page.map((x) => el('li', { className: 'srw-release-item' }, [
         el('strong', { textContent: x.studio }),
         el('span', { className: 'srw-release-date', textContent: `${x.rename} rename · ${x.move} move${x.other ? ` · ${x.other} to check` : ''}` }),
-        el('button', { className: 'srw-btn srw-btn-sm', textContent: 'Details…', title: 'Show which files would be renamed / moved, and rename or move them', onClick: () => showPlan(x) }),
+        window.SRW.iconButton('button', 'faList', 'Details…', { className: 'srw-btn srw-btn-sm', title: 'Details: show which files would be renamed / moved, and rename or move them', onClick: () => showPlan(x) }),
       ]))),
     });
 
@@ -1228,10 +1259,10 @@
           const sameFolder = x.path.slice(0, x.path.lastIndexOf('/')) === x.new_path.slice(0, x.new_path.lastIndexOf('/'));
           const verb = sameFolder ? 'Rename' : 'Move';
           parts.push(window.SRW.iconButton('button', 'faFingerprint', 'Check what the file is', {
-            className: 'srw-btn srw-btn-sm', title: 'Ask StashDB what this file is, by its fingerprints (nothing is changed)',
+            className: 'srw-btn srw-btn-sm', title: 'Ask the metadata provider what this file is, by its fingerprints (nothing is changed)',
             onClick: async (e) => {
               const b = e.currentTarget;
-              b.disabled = true; window.SRW.setBusy(rowStatus, 'asking StashDB…');
+              b.disabled = true; window.SRW.setBusy(rowStatus, 'asking the provider…');
               try {
                 const r = await window.SRW.runOp('organize_check_file', { scene_id: x.scene_id });
                 rowStatus.textContent = r.error ? ` error: ${r.error}` : ` ${r.message}`;
@@ -1519,8 +1550,8 @@
         .map(([k, label]) => `${(p[k] || []).length} ${label}`).join(' · ');
       slot.replaceChildren(
         el('p', { className: 'srw-hint', textContent: `${p.in_place || 0} film file(s) already sit where the templates put them; ${differing} differ (${counts}); checked ${new Date(at).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}.` }),
-        el('div', { className: 'srw-toolbar' }, [el('button', { className: 'srw-btn srw-btn-primary', textContent: 'Details…',
-          title: 'Show which files would be renamed / moved, and rename or move them', onClick: openDetails })]),
+        el('div', { className: 'srw-toolbar' }, [window.SRW.iconButton('button', 'faList', 'Details…', { className: 'srw-btn srw-btn-primary',
+          title: 'Details: show which files would be renamed / moved, and rename or move them', onClick: openDetails })]),
       );
     }
     try {
@@ -1800,15 +1831,15 @@
       });
       // already sent (the scene carries the tag): a badge instead of a button that would be clicked again (v0.228.5)
       const inReviewBadge = () => el('span', { className: 'srw-history-category', textContent: 'in Review: Identify Scene', title: 'The scene carries the tag; identify it there (Maintenance > Review: Identify Scene)' });
-      const identBtn = x.in_review ? inReviewBadge() : el('button', {
-        className: 'srw-btn srw-btn-sm', textContent: 'Send to Identify Scene',
+      const identBtn = x.in_review ? inReviewBadge() : window.SRW.iconButton('button', ['faFingerprint', 'faMagnifyingGlass'], 'Send to Identify Scene', {
+        className: 'srw-btn srw-btn-sm',
         title: 'A single scene: adds the tag “Review: Identify Scene” (nothing else changes); the tools to identify it are in Maintenance > Review: Identify Scene',
         onClick: async (e) => {
           const res = await window.SRW.runOp('compare_review_add', { scene_id: x.scene_id });
           if (res.error) { rowStatus.textContent = ` error: ${res.error}`; return; }
           x.in_review = true;
           markReviewed(x.scene_id);
-          e.target.replaceWith(inReviewBadge());
+          identBtn.replaceWith(inReviewBadge());
           rowStatus.textContent = ' sent (the file stays here until it is identified; then Analyse again)';
         },
       });
@@ -1990,7 +2021,7 @@
           + 'empty folders are removed, the source folder itself stays. Files no fingerprint knows stay put until you pick a match.',
       }),
       el('div', { className: 'srw-toolbar' }, [
-        el('button', { className: 'srw-btn', textContent: 'Refresh', onClick: loadSources }),
+        window.SRW.iconButton('button', 'faRotate', 'Reload', { className: 'srw-btn', title: 'Reload: ask again, the list shown is a kept one', onClick: loadSources }),
         el('button', { className: 'srw-btn', textContent: 'Add folder', onClick: openAddFolder }),
         status,
       ]),
@@ -2068,7 +2099,7 @@
             r.held_by ? el('span', { className: 'srw-hint', textContent: ` scene ${r.held_by} has it` }) : null]) : null,
           window.SRW.buildStashLink('scene', x.id, 'Play in Stash'),
           r && r.state === 'unique' ? el('button', { className: 'srw-btn srw-btn-sm srw-btn-primary', textContent: 'Assign',
-            onClick: (e) => confirmInline(e.currentTarget, `Put the StashDB scene “${r.matches[0].title}” on this file? Title, date, studio, performers and tags are filled in; the old state is saved to the backup file.`, async () => {
+            onClick: (e) => confirmInline(e.currentTarget, `Put the ${r.matches[0].provider === 'theporndb' ? 'ThePornDB' : 'StashDB'} scene “${r.matches[0].title}” on this file? Title, date, studio, performers and tags are filled in; the old state is saved to the backup file.`, async () => {
               const res = (await window.SRW.runOp('compare_unidentified_apply', { scene_ids: [x.id] })).results || {};
               const one = res[x.id] || {};
               if (one.error) { rowStatus.textContent = ` error: ${one.error}`; return; }
@@ -2124,14 +2155,14 @@
     }
     const loader = autoLoader(status, load);
     const checkBtn = window.SRW.iconButton('button', 'faFingerprint', 'Check fingerprints (dry run)', {
-      title: 'Asks StashDB which scene each file is, by exact fingerprint: one request per 40 files. Nothing is changed.' });
+      title: 'Asks StashDB (and ThePornDB for what StashDB does not know) which scene each file is, by exact fingerprint. Nothing is changed.' });
     const runCheck = async (all) => {
       const todo = items.filter((i) => all || !results[i.id]).map((i) => i.id);
       if (!todo.length) { notify('Unidentified scenes', 'Everything listed was checked already.', 'info'); return; }
       checkBtn.disabled = true;
       try {
         for (let i = 0; i < todo.length; i += 120) {
-          status.textContent = ` checking ${Math.min(i + 120, todo.length)} / ${todo.length} at StashDB…`;
+          status.textContent = ` checking ${Math.min(i + 120, todo.length)} / ${todo.length}…`;
           const r = await window.SRW.runOp('compare_unidentified_check', { scene_ids: todo.slice(i, i + 120) });
           if (r.error) { status.textContent = ` error: ${r.error}`; break; }
           Object.assign(results, r.results || {});
@@ -2142,10 +2173,10 @@
     };
     checkBtn.addEventListener('click', () => runCheck(false));
     const recheckBtn = window.SRW.iconButton('button', 'faArrowsRotate', 'Check everything again', {
-      title: 'Asks StashDB again for every listed file, also the ones checked before (one request per 40 files)' });
-    recheckBtn.addEventListener('click', () => confirmInline(recheckBtn, `Ask StashDB again for all ${items.length} files (about ${Math.ceil(items.length / 40)} requests)?`, () => runCheck(true)));
+      title: 'Asks the providers again for every listed file, also the ones checked before' });
+    recheckBtn.addEventListener('click', () => confirmInline(recheckBtn, `Ask the providers again for all ${items.length} files?`, () => runCheck(true)));
     assignBtn.addEventListener('click', () => confirmInline(assignBtn,
-      `Assign the StashDB scene to ${count('unique')} file(s) that matched exactly one scene? Title, date, studio, performers and tags are filled in; each old state is saved to the backup file first.`,
+      `Assign the matched scene to ${count('unique')} file(s) that matched exactly one scene? Title, date, studio, performers and tags are filled in; each old state is saved to the backup file first.`,
       async () => {
         const ids = items.filter((i) => (results[i.id] || {}).state === 'unique').map((i) => i.id);
         let done = 0; let failed = 0;
@@ -2175,7 +2206,7 @@
     });
     const pane = el('div', {}, [
       el('p', { className: 'srw-hint', textContent: 'Files in your scene folders that Stash has no StashDB / ThePornDB id for (the film folders and the import folder are left out). '
-        + '“Check fingerprints” asks StashDB which scene each file is and changes nothing (the results are kept, also after a reload; files already checked are skipped); only a file that matches exactly ONE StashDB scene, which no other file of yours has, can be assigned. '
+        + '“Check fingerprints” asks StashDB (and ThePornDB, for what StashDB does not know) which scene each file is, by exact fingerprint, and changes nothing (the results are kept, also after a reload; files already checked are skipped); only a file that matches exactly ONE scene, which no other file of yours has, can be assigned. '
         + 'Several matches, none or doubtful cases go to Review: Identify Scene (name search, ThePornDB, playing).' }),
       el('div', { className: 'srw-toolbar' }, [window.SRW.iconButton('button', 'faRotate', 'Reload', { title: 'Reload: read the list from Stash again (it is kept until then; scenes you identify or send to Review leave it at once)', onClick: () => { forceFresh = true; loader(true); } }), checkBtn, recheckBtn, assignBtn, bulkReview,
         el('label', {}, ['show: ', filterSel]), status]),
@@ -2199,7 +2230,7 @@
       const note = el('span', { className: 'srw-key-status' });
       const card = el('div', { className: `srw-search-card srw-perf-card${p.on_watchlist ? ' srw-perf-card-watched' : ''}` });
       const img = p.image_path
-        ? el('img', { className: 'srw-search-card-image', src: p.image_path, loading: 'lazy', alt: p.name })
+        ? el('img', { className: 'srw-search-card-image', src: window.SRW.stashUrl(p.image_path), loading: 'lazy', alt: p.name })
         : el('div', { className: 'srw-search-card-image srw-search-card-noimage' });
       card.appendChild(el('a', { href: `/performers/${p.id}`, target: '_blank', rel: 'noopener noreferrer', title: 'Open the performer in Stash (new tab)' }, [img]));
       card.appendChild(el('div', { className: 'srw-search-card-title' }, [
@@ -2260,7 +2291,7 @@
     const hideBox = el('input', { type: 'checkbox', checked: false, onChange: (e) => { hideWatchlist = e.target.checked; perfView.reset(); } });
     const perfPane = el('div', {}, [
       el('div', { className: 'srw-toolbar' }, [
-        el('button', { className: 'srw-btn', textContent: 'Refresh', onClick: () => loader(true) }),
+        window.SRW.iconButton('button', 'faRotate', 'Reload', { className: 'srw-btn', title: 'Reload: ask again, the list shown is a kept one', onClick: () => loader(true) }),
         el('label', {}, [hideBox, ` hide the ones on the ${wkWord} (they are meant to have no scene yet)`]), perfStatus,
       ]),
       summary,
@@ -2680,7 +2711,7 @@
     const libraryPane = el('div', {}, [
       el('p', { className: 'srw-hint', textContent: 'Wanted movies whose file is ALREADY in the library (Whisparr imported it earlier, often under another ThePornDB id) -- they would be downloaded again. “Clear” = the length fits '
         + 'and the scene is in at most one group; “to decide” = the length does not fit (ThePornDB sometimes lists one disc only) or the file is in several groups. Using the existing file downloads, moves and deletes nothing.' }),
-      el('div', { className: 'srw-toolbar' }, [el('button', { className: 'srw-btn', textContent: 'Check', onClick: () => loadLibrary() }), applyClearBtn, libStatus]),
+      el('div', { className: 'srw-toolbar' }, [window.SRW.iconButton('button', 'faClipboardCheck', 'Check', { className: 'srw-btn', onClick: () => loadLibrary() }), applyClearBtn, libStatus]),
       libSummary,
       libView.node,
     ]);
@@ -3244,7 +3275,7 @@
             dismissBtn);
         }
       } else if (c.status === 'dismissed') {
-        actions.push(el('button', { type: 'button', className: 'srw-btn', textContent: 'Restore', title: 'Back on the list',
+        actions.push(window.SRW.iconButton('button', 'faRotateLeft', 'Restore', { className: 'srw-btn', title: 'Restore: back on the list',
           onClick: async () => {
             const r = await window.SRW.runOp('upgrades_bulk', { ids: [c.id], action: 'restore' });
             if (r.error) { notify('Restore', r.error, 'error'); return; }
@@ -3320,7 +3351,7 @@
         load();
       },
     });
-    const refreshBtn = el('button', { className: 'srw-btn', textContent: 'Refresh', onClick: () => load() });
+    const refreshBtn = window.SRW.iconButton('button', 'faRotate', 'Reload', { className: 'srw-btn', title: 'Reload: ask again, the list shown is a kept one', onClick: () => load() });
     const closeBtn = el('button', {
       className: 'srw-btn', textContent: 'Close resolved pairs',
       title: 'Open pairs where one scene is gone, or both scenes have different provider ids and neither is marked for review',
@@ -4089,7 +4120,7 @@
           + '“Review done” takes the tag off. Every change is saved to compare_removed_ids.jsonl and History first.',
       }),
       REVIEW_TABS.length > 1 ? el('div', { className: 'srw-subtabs' }, reviewTabBtns.map((t) => t.b)) : null,
-      el('div', { className: 'srw-toolbar' }, [el('span', { className: 'srw-view-toggle' }, reviewFilterBtns.map((f) => f.b)), el('button', { className: 'srw-btn', textContent: 'Refresh', onClick: () => loadReview() }), closeIdentifiedBtn, reviewStatus]),
+      el('div', { className: 'srw-toolbar' }, [el('span', { className: 'srw-view-toggle' }, reviewFilterBtns.map((f) => f.b)), window.SRW.iconButton('button', 'faRotate', 'Reload', { className: 'srw-btn', title: 'Reload: ask again, the list shown is a kept one', onClick: () => loadReview() }), closeIdentifiedBtn, reviewStatus]),
       reviewList,
     ]);
     // Only the part that is shown is loaded (each area is its own page now).

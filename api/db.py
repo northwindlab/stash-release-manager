@@ -497,6 +497,7 @@ class Database:
         self._migrate_watchlist_auto_handoff(conn)
         self._migrate_release_backlog_status(conn)
         self._migrate_library_check_finding_file_paths(conn)
+        self._migrate_library_check_run_provider(conn)
         self._migrate_release_download_job(conn)
         self._migrate_seed_download_client_from_legacy_sabnzbd(conn)
         self._migrate_release_search_status(conn)
@@ -1167,6 +1168,13 @@ class Database:
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(library_check_finding)").fetchall()}
         if "file_paths" not in cols:
             conn.execute("ALTER TABLE library_check_finding ADD COLUMN file_paths TEXT")
+
+    def _migrate_library_check_run_provider(self, conn):
+        """Adds `library_check_run.provider` (v0.243.0): which metadata provider the run asked ('stashdb' for every run before). Its findings
+        belong to that provider (library_check_finding.run_id)."""
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(library_check_run)").fetchall()}
+        if "provider" not in cols:
+            conn.execute("ALTER TABLE library_check_run ADD COLUMN provider TEXT NOT NULL DEFAULT 'stashdb'")
 
     def _migrate_release_backlog_status(self, conn):
         """Adds the 'backlog' status (2026-09-13, see PROGRESS.md's

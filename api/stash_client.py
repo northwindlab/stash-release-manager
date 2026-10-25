@@ -545,11 +545,11 @@ class StashClient:
         data = self._graphql(GENERATE_METADATA_MUTATION, variables)
         return data["metadataGenerate"]
 
-    def submit_fingerprints(self, scene_id):
+    def submit_fingerprints(self, scene_id, endpoint=None):
         """Submits the fingerprints (phash, oshash, md5 + duration) of the scene's files to StashDB with Stash's own stash-box account --
         the same mutation as the tagger's "Submit fingerprints". PUBLIC and not undoable; the scene must carry a StashDB id. (v0.106.7)"""
         data = self._graphql("mutation($input: StashBoxFingerprintSubmissionInput!) { submitStashBoxFingerprints(input: $input) }",
-                             {"input": {"scene_ids": [str(scene_id)], "stash_box_endpoint": self.stashdb_endpoint}})
+                             {"input": {"scene_ids": [str(scene_id)], "stash_box_endpoint": endpoint or self.stashdb_endpoint}})
         return bool(data["submitStashBoxFingerprints"])
 
     def regenerate_phash(self, scene_id):
@@ -1034,7 +1034,7 @@ class StashClient:
         filter_field = "studios" if local_entity_type == "studio" else "performers"
         scene_filter = {
             filter_field: {"value": [str(local_id)], "modifier": "INCLUDES"},
-            "stash_id_endpoint": {"endpoint": self.stashdb_endpoint, "modifier": "NOT_NULL"},
+            "stash_id_endpoint": {"endpoint": endpoint or self.stashdb_endpoint, "modifier": "NOT_NULL"},
         }
         count_data = self._graphql(FIND_SCENES_BY_STASH_IDS_QUERY, {"scene_filter": scene_filter, "filter": {"per_page": 1}})
         total = count_data["findScenes"]["count"]
@@ -1059,7 +1059,7 @@ class StashClient:
         scenes = data["findScenes"]["scenes"]
         return scenes[0] if scenes else None
 
-    def all_scenes_with_stashdb_id(self):
+    def all_scenes_with_stashdb_id(self, endpoint=None):
         """Every local scene carrying a StashDB stash_id, with its
         files' own fingerprints included -- feeds
         scripts/audit_library_fingerprints.py's retroactive check of
