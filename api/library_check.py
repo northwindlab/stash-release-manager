@@ -57,7 +57,7 @@ def list_scenes_in_scope(stash_client, paths, endpoint=None):
 
 
 def find_library_mismatches(stashdb_client, scenes, stashdb_endpoint,
-                             batch_size=MAX_FINGERPRINT_BATCH, delay=0.5, progress_cb=None, provider_name="StashDB"):
+                             batch_size=MAX_FINGERPRINT_BATCH, delay=0.5, progress_cb=None, provider_name="StashDB", judge=None):
     """The actual check: batches each in-scope scene's own local
     fingerprints through StashDB's reverse lookup
     (find_scenes_by_fingerprints()) and classifies against what that
@@ -90,7 +90,8 @@ def find_library_mismatches(stashdb_client, scenes, stashdb_endpoint,
         if not fps or not stashdb_id:
             unverifiable.append({"id": s["id"], "title": s["title"], "paths": paths, "reason": "no local fingerprints yet"})
             continue
-        checkable.append({"id": s["id"], "title": s["title"], "paths": paths, "stashdb_id": stashdb_id, "fps": fps})
+        seconds = next((f.get("duration") for f in (s.get("files") or []) if f.get("duration")), None)
+        checkable.append({"id": s["id"], "title": s["title"], "paths": paths, "stashdb_id": stashdb_id, "fps": fps, "seconds": seconds})
 
     matches, mismatches, ambiguous = [], [], []
     total = len(checkable)
@@ -99,7 +100,15 @@ def find_library_mismatches(stashdb_client, scenes, stashdb_endpoint,
         results = stashdb_client.find_scenes_by_fingerprints([c["fps"] for c in batch])
         for entry, found in zip(batch, results):
             found_ids = {f["id"] for f in found}
-            if entry["stashdb_id"] in found_ids:
+            if entry["stashdb_id"] in found_ids and len(found) > 1 and judge is not None:
+                # The file is registered at several scenes (v0.246.0): the tag being one of them proves little. `judge(entry, found)` -> shared_fingerprint.judge().
+                verdict = judge(entry, found)
+                if verdict["ok"]:
+                    matches.append(entry)
+                else:
+                    ambiguous.append({"id": entry["id"], "title": entry["title"], "paths": entry["paths"], "expected_stashdb_id": entry["stashdb_id"],
+                                      "found_as": found, "reason": verdict["how"], "shared": True, "verdict": verdict})
+            elif entry["stashdb_id"] in found_ids:
                 matches.append(entry)
             elif not found:
                 unverifiable.append({
@@ -158,7 +167,7 @@ def apply_fix(stash_client, scene_id, expected_target_id, create_missing_perform
                                      keep_other_endpoints=keep_other_endpoints)
 
 
-def recheck_finding(db, stash_client, stashdb_client, finding, endpoint=None, provider_name="StashDB"):
+def recheck_finding(db, stash_client, stashdb_client, finding, endpoint=None, provider_name="StashDB", judge=None):
     """"Re-check fingerprints" on a "Needs manual review" finding (v0.238.0): asks the provider (StashDB unless the run used another, v0.243.0) again for what the scene's file(s) are -- someone may have
     registered fingerprints since the run -- and files the answer like a run would: a match closes the finding, one other scene makes it an
     auto-fixable mismatch, several scenes an ambiguous one, nothing leaves it unverifiable. Returns {"result", "message"} or {"error"}."""
@@ -166,7 +175,7 @@ def recheck_finding(db, stash_client, stashdb_client, finding, endpoint=None, pr
     scene = stash_client.scene_for_fingerprint_check(finding["scene_id"])
     if scene is None:
         return {"error": "Stash has no scene with this id any more"}
-    matches, mismatches, ambiguous, unverifiable = find_library_mismatches(stashdb_client, [scene], endpoint or stash_client.stashdb_endpoint, delay=0, provider_name=provider_name)
+    matches, mismatches, ambiguous, unverifiable = find_library_mismatches(stashdb_client, [scene], endpoint or stash_client.stashdb_endpoint, delay=0, provider_name=provider_name, judge=judge)
     run_id = finding.get("run_id")
     if matches:
         library_check_repo.delete_finding(db, finding["id"])
@@ -180,8 +189,8 @@ def recheck_finding(db, stash_client, stashdb_client, finding, endpoint=None, pr
     if ambiguous:
         a = ambiguous[0]
         library_check_repo.insert_finding(db, run_id, a["id"], a["title"], "ambiguous", expected_stashdb_id=a["expected_stashdb_id"],
-                                          candidates=a["found_as"], file_paths=a["paths"])
-        return {"result": "ambiguous", "message": f"{provider_name} lists {len(a['found_as'])} scenes for this file: "
+                                          candidates=a["found_as"], file_paths=a["paths"], reason=a.get("reason"))
+        return {"result": "ambiguous", "message": (a["reason"] + ". " if a.get("reason") else "") + f"{provider_name} lists {len(a['found_as'])} scenes for this file: "
                 + ", ".join(c.get("title") or c["id"] for c in a["found_as"])}
     u = unverifiable[0] if unverifiable else {"reason": "unknown"}
     return {"result": "unverifiable", "message": f"Still not verifiable: {u['reason']}."}

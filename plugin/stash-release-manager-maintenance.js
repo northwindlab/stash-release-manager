@@ -666,7 +666,7 @@
     const { el } = window.SRW;
     const buildItem = (f) => {
       const detail = f.kind === 'ambiguous'
-        ? `candidates: ${(f.candidates || []).map((c) => c.title).join(', ')}`
+        ? `${f.reason ? `${f.reason}. ` : ''}candidates: ${(f.candidates || []).map((c) => c.title).join(', ')}`
         : (f.reason || '');
       const dismissBtn = el('button', { className: 'srw-btn srw-btn-sm', textContent: 'Dismiss' });
       dismissBtn.addEventListener('click', async () => {
@@ -1411,9 +1411,11 @@
     // A Recount that is still running (the page was reloaded meanwhile) is picked up again.
     window.SRW.runOp('organize_recount_status').then((st) => { if (st && st.running) pollRecount(); }).catch(() => {});
     const moviesPane = buildOrganizeMoviesSection();
+    const sharedCount = el('span', { className: 'srw-hint' });
     const panes = [
       { key: 'scenes', label: 'Scenes by studio', pane: scenesPane },
       { key: 'movies', label: 'Films vs. movie templates', pane: moviesPane },
+      { key: 'shared', label: () => `Shared fingerprints ${sharedCount.textContent}`.trim(), watch: sharedCount, pane: buildSharedPane(sharedCount) },
     ];
     const section = el('div', { className: 'srw-settings-section' }, [
       el('h3', { textContent: 'Organize library (rename / move)' }),
@@ -1421,6 +1423,94 @@
       ...panes.map((x) => x.pane),
     ]);
     return section;
+  }
+
+  // Files registered at several provider scenes (v0.246.0, api/shared_fingerprint.py): the same fingerprint sits on more than one scene (a re-release of the
+  // same footage), so "the tag is one of them" proves little. The list stays until the user has settled each scene (or a scan finds it fine).
+  function buildSharedPane(countSpan) {
+    const { el, confirmInline, notify } = window.SRW;
+    const status = el('span', { className: 'srw-key-status' });
+    const scanLine = el('p', { className: 'srw-hint' });
+    const list = el('div');
+    const STATES = [['open', 'To decide'], ['kept', 'Tag kept'], ['retagged', 'Changed'], ['dismissed', 'Dismissed'], ['resolved', 'Settled by a scan']];
+    const stateSelect = el('select', { title: 'Which scenes to show' }, STATES.map(([k, t]) => el('option', { value: k, textContent: t })));
+    const fmtMin = (sec) => (sec ? `${Math.round(sec / 60)} min` : 'no length');
+    const fits = (a, b) => Boolean(a && b && Math.abs(a - b) / Math.max(a, b) <= 0.06);
+    let rows = [];
+    let counts = {};
+    let view = null;
+
+    async function load() {
+      const r = await window.SRW.runOp('organize_shared', { status: stateSelect.value });
+      if (r.error) { status.textContent = ` error: ${r.error}`; return; }
+      rows = r.rows || [];
+      counts = r.counts || {};
+      countSpan.textContent = counts.open ? `(${counts.open})` : '';
+      [...stateSelect.options].forEach((o) => { o.textContent = `${STATES.find((x) => x[0] === o.value)[1]} (${counts[o.value] || 0})`; });
+      const sc = r.scan || {};
+      scanLine.textContent = sc.running ? `Scan running: ${sc.provider || ''} ${sc.done} / ${sc.total}, ${sc.found} to decide so far…`
+        : (r.scanned_at ? `Last scan: ${r.scanned_at} UTC${sc.error ? ` (error: ${sc.error})` : ''}.` : 'No scan yet: press "Scan the library" (a few minutes: every scene with a provider id is looked up once).');
+      if (!view) {
+        view = window.SRW.buildFilteredPagedList({
+          filters: ['search'], perPage: 15, showFilterBarFrom: 10,
+          emptyText: 'Nothing to decide here.',
+          fetchPage: window.SRW.localPageFetcher(() => rows, { text: (c) => `${c.local_title} ${c.file_path} ${c.candidates.map((x) => `${x.title} ${x.studio}`).join(' ')}` }),
+          renderItems: (items) => el('ul', { className: 'srw-release-list' }, items.map(buildRow)),
+        });
+        list.appendChild(view.node);
+        stateSelect.addEventListener('change', async () => { await load(); view.reset(); });
+      }
+      view.reload();
+      if (sc.running) setTimeout(() => { if (list.isConnected) load(); }, 4000);
+    }
+
+    function buildRow(c) {
+      const sameTitle = (t) => Boolean(t && c.local_title && t.trim().toLowerCase() === c.local_title.trim().toLowerCase());
+      const cands = c.candidates.map((x) => {
+        const isTag = x.id === c.tag_id;
+        const chips = [isTag ? 'tagged now' : null, fits(c.file_seconds, x.seconds) ? 'length fits the file' : null, sameTitle(x.title) ? 'same title as your scene' : null]
+          .filter(Boolean).map((t) => el('span', { className: 'srw-chip', textContent: t }));
+        const use = !isTag && c.status === 'open' ? el('button', { type: 'button', className: 'srw-btn', textContent: 'Use this scene',
+          title: 'Give your scene this provider scene (title, date, studio, performers); your scene is saved first. Rename / move the file afterwards under "Scenes by studio".',
+          onClick: (e) => confirmInline(e.currentTarget, `Give "${c.local_title}" the scene "${x.title}" (${x.studio || '?'}, ${x.date || '?'})? Its metadata is replaced; the old state is saved.`, async () => {
+            const res = await window.SRW.runOp('organize_shared_use', { scene_id: c.scene_id, candidate_id: x.id });
+            if (res.error) { notify('Shared fingerprints', res.error, 'error'); return; }
+            notify('Shared fingerprints', 'Done. The file is renamed / moved by "Scenes by studio" (Recount, then Details).', 'success');
+            await load();
+          }) }) : null;
+        return el('li', {}, [el('strong', { textContent: x.title || x.id }), ` — ${x.studio || '?'}, ${x.date || '?'}, ${fmtMin(x.seconds)} `, ...chips, ' ', use]);
+      });
+      const actions = [window.SRW.buildStashLink('scene', c.scene_id, 'Play in Stash')];
+      if (c.status === 'open') {
+        actions.push(el('button', { type: 'button', className: 'srw-btn', textContent: 'Tag is right', title: 'Keep the current tag; this scene is not listed again',
+          onClick: async () => { await window.SRW.runOp('organize_shared_keep', { scene_id: c.scene_id }); await load(); } }));
+        actions.push(el('button', { type: 'button', className: 'btn btn-outline-danger srw-btn-fit srw-btn-dismiss', textContent: 'Dismiss', title: 'Leave it as it is and take it off the list',
+          onClick: async () => { await window.SRW.runOp('organize_shared_dismiss', { scene_id: c.scene_id }); await load(); } }));
+      }
+      return el('li', { className: 'srw-release-row' }, [
+        el('div', { className: 'srw-rr-main' }, [
+          el('div', {}, [el('a', { href: `/scenes/${c.scene_id}`, textContent: c.local_title || c.file_path.split('/').pop() }), ` — file ${fmtMin(c.file_seconds)}`]),
+          el('div', { className: 'srw-hint', textContent: c.file_path }),
+          el('div', { className: 'srw-review-warning', textContent: c.how }),
+          el('ul', { className: 'srw-hint' }, cands),
+        ]),
+        el('div', { className: 'srw-rr-actions' }, actions),
+      ]);
+    }
+
+    const scanBtn = el('button', { type: 'button', className: 'srw-btn', textContent: 'Scan the library',
+      title: 'Looks up every scene with a provider id and lists those whose file is registered at several provider scenes and where the length cannot confirm the tag. Changes nothing.',
+      onClick: async () => { const r = await window.SRW.runOp('organize_shared_scan'); if (r.error) { notify('Scan', r.error, 'error'); return; } load(); } });
+    const pane = el('div', {}, [
+      el('p', { className: 'srw-hint', textContent: 'Fingerprints are crowd-sourced: when the same footage was released twice (another site re-sold it), the same fingerprint sits on two or more provider scenes. '
+        + 'Then "the tag is one of the matches" proves little, and a file can be filed under the wrong studio. Here are the scenes where the length of the file does not settle it. '
+        + 'Pick the right scene, keep the tag, or dismiss. A scene stays here until you have decided or a scan finds it fine.' }),
+      el('div', { className: 'srw-toolbar' }, [scanBtn, stateSelect, status]),
+      scanLine,
+      list,
+    ]);
+    load();
+    return pane;
   }
 
   // Existing films against the movie templates (v0.202.0, api/library_organize.py movies_plan): the film files in the movie folders that do not

@@ -80,7 +80,7 @@ query SceneFilePaths($id: ID!) {
 FIND_SCENE_BY_PATH_QUERY = """
 query FindSceneByPath($scene_filter: SceneFilterType) {
   findScenes(scene_filter: $scene_filter, filter: {per_page: 1}) {
-    scenes { id title created_at stash_ids { endpoint stash_id } files { id path created_at fingerprints { type value } } }
+    scenes { id title created_at stash_ids { endpoint stash_id } files { id path duration created_at fingerprints { type value } } }
   }
 }
 """
@@ -99,7 +99,7 @@ query FindScenesWithStashdbId($scene_filter: SceneFilterType, $filter: FindFilte
       id
       title
       stash_ids { endpoint stash_id }
-      files { path fingerprints { type value } }
+      files { path duration fingerprints { type value } }
     }
   }
 }

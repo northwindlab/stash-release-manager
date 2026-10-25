@@ -133,6 +133,25 @@ CREATE TABLE IF NOT EXISTS upgrade_candidate (
     UNIQUE (scene_id, file_path)
 );
 
+-- Shared fingerprints (v0.246.0, see shared_fingerprint.py): scenes whose file is registered at several provider scenes and where the length
+-- cannot confirm the tag. One row per scene, worked through by the user in Maintenance > Organize library > Shared fingerprints.
+-- status: 'open', 'kept' (the user says the tag is right), 'retagged' (the user chose another scene), 'dismissed', 'resolved' (a later scan found it fine).
+CREATE TABLE IF NOT EXISTS shared_fingerprint_review (
+    scene_id     TEXT PRIMARY KEY,
+    local_title  TEXT,
+    file_path    TEXT,
+    file_seconds REAL,
+    provider     TEXT,
+    tag_id       TEXT,
+    reason       TEXT,
+    how          TEXT,
+    candidates   TEXT,
+    status       TEXT NOT NULL DEFAULT 'open',
+    note         TEXT,
+    found_at     TEXT,
+    resolved_at  TEXT
+);
+
 -- Convert (v0.245.0, see convert.py): library files no browser plays directly (old video codec or container) that an encode worker turns into
 -- H.264 + AAC in an MP4. One row per file: it is the candidate AND the job. mode: 'reencode' | 'remux'. status: 'wanted' (listed), 'queued' (the
 -- user asked), 'running' (a worker has it), 'verifying' / 'replacing' (the sidecar checks the file / swaps it into the scene), 'done', 'failed',

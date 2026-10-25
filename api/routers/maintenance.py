@@ -24,6 +24,7 @@ from pydantic import BaseModel
 
 import history
 import fingerprint_provider
+import shared_fingerprint
 import library_check
 import library_check_repo
 import quality_profile_repo
@@ -336,6 +337,42 @@ def organize_plan(studio_id: str, fresh: bool = False):
     return _organizer().plan_for_studio(studio_id, fresh=fresh)
 
 
+@router.get("/organize/shared")
+def organize_shared(status: str = "open"):
+    """Files registered at several provider scenes that the length could not settle (shared_fingerprint.py): the list, counts, the last scan."""
+    return _organizer().shared_overview(status if status in ("open", "kept", "retagged", "dismissed", "resolved") else "open")
+
+
+@router.post("/organize/shared/scan")
+def organize_shared_scan():
+    return _organizer().start_shared_scan()
+
+
+@router.post("/organize/shared/{scene_id}/use")
+def organize_shared_use(scene_id: str, body: dict):
+    result = _importer().shared_use(scene_id, body.get("candidate_id") or "")
+    if result.get("error"):
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@router.post("/organize/shared/{scene_id}/keep")
+def organize_shared_keep(scene_id: str):
+    """The scene's tag is right although the file is registered at other scenes too: it is not listed again (and Organize trusts it)."""
+    row = shared_fingerprint.get(_db, scene_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="this scene is not on the list")
+    scene = _get_stash_client().scene_for_fingerprint_check(scene_id)  # the tag it carries NOW (it may have been changed since the row was made)
+    endpoint = _organizer().endpoint_of(row["provider"])
+    tag = next((x["stash_id"] for x in (scene or {}).get("stash_ids") or [] if x["endpoint"] == endpoint), row["tag_id"])
+    return {"changed": shared_fingerprint.set_status(_db, scene_id, "kept", tag_id=tag)}
+
+
+@router.post("/organize/shared/{scene_id}/dismiss")
+def organize_shared_dismiss(scene_id: str):
+    return {"changed": shared_fingerprint.set_status(_db, scene_id, "dismissed")}
+
+
 @router.post("/organize/apply")
 def organize_apply(body: dict):
     kinds = [k for k in (body.get("kinds") or ["rename", "move"]) if k in ("rename", "move", "check")]
@@ -361,14 +398,14 @@ def organize_check_file(body: dict):
     lookup, row = _resolve_provider(row["key"])
     name = row["name"]
     matches, mismatches, ambiguous, unverifiable = library_check.find_library_mismatches(
-        lookup, [scene], row["endpoint"], delay=0, provider_name=name)
+        lookup, [scene], row["endpoint"], delay=0, provider_name=name, judge=shared_fingerprint.make_judge(_db, lookup, row["key"]))
     if matches:
         return {"result": "match", "message": f"{name} has this file's fingerprints on the scene it is tagged with -- the tag is right. Press \"Check again\" to plan it."}
     if mismatches:
         names = ", ".join(c.get("title") or c["id"] for c in mismatches[0]["found_as"])
         return {"result": "mismatch", "message": f"{name} identifies the file as another scene: {names}. The tag looks wrong -- fix it on the Fingerprint check page."}
     if ambiguous:
-        return {"result": "ambiguous", "message": f"{name} lists {len(ambiguous[0]['found_as'])} scenes for this file: "
+        return {"result": "ambiguous", "message": (ambiguous[0].get("reason") + ". " if ambiguous[0].get("reason") else "") + f"{name} lists {len(ambiguous[0]['found_as'])} scenes for this file: "
                 + ", ".join(c.get("title") or c["id"] for c in ambiguous[0]["found_as"])}
     reason = unverifiable[0]["reason"] if unverifiable else "unknown"
     return {"result": "unverifiable", "message": f"{name} cannot tell: {reason}."}
@@ -878,7 +915,7 @@ def _run_check(run_id, paths, provider="stashdb"):
         matches, mismatches, ambiguous, unverifiable = library_check.find_library_mismatches(
             stashdb_client, scenes, prow["endpoint"],
             progress_cb=lambda current, total: library_check_repo.update_run_progress(_db, run_id, current, total),
-            provider_name=prow["name"],
+            provider_name=prow["name"], judge=shared_fingerprint.make_judge(_db, stashdb_client, prow["key"]),
         )
         for m in mismatches:
             library_check_repo.insert_finding(
@@ -888,7 +925,7 @@ def _run_check(run_id, paths, provider="stashdb"):
         for a in ambiguous:
             library_check_repo.insert_finding(
                 _db, run_id, a["id"], a["title"], "ambiguous",
-                expected_stashdb_id=a["expected_stashdb_id"], candidates=a["found_as"], file_paths=a["paths"],
+                expected_stashdb_id=a["expected_stashdb_id"], candidates=a["found_as"], file_paths=a["paths"], reason=a.get("reason"),
             )
         for u in unverifiable:
             library_check_repo.insert_finding(
@@ -980,7 +1017,8 @@ def recheck_finding(finding_id: int):
     if finding.get("status") != "pending":
         raise HTTPException(status_code=400, detail="only an open finding can be re-checked")
     lookup, prow = _resolve_provider(library_check_repo.provider_of_finding(_db, finding))
-    result = library_check.recheck_finding(_db, _get_stash_client(), lookup, finding, endpoint=prow["endpoint"], provider_name=prow["name"])
+    result = library_check.recheck_finding(_db, _get_stash_client(), lookup, finding, endpoint=prow["endpoint"], provider_name=prow["name"],
+                                             judge=shared_fingerprint.make_judge(_db, lookup, prow["key"]))
     if result.get("error"):
         raise HTTPException(status_code=400, detail=result["error"])
     return result

@@ -742,6 +742,28 @@ class Importer(Organizer):
             json.dump(scene, f, indent=1, ensure_ascii=False)
         return path
 
+    def shared_use(self, scene_id, candidate_id):
+        """The user picked another of the provider scenes a file is registered at: the scene gets that scene's id and metadata (the scene's state is
+        saved first). The files are renamed / moved by Organize afterwards. Returns {"ok", "backup"} or {"error"}."""
+        import shared_fingerprint
+        row = next((r for r in shared_fingerprint.rows(self.db) if str(r["scene_id"]) == str(scene_id)), None)
+        if row is None:
+            return {"error": "this scene is not on the list (any more)"}
+        if candidate_id not in {c["id"] for c in row["candidates"]}:
+            return {"error": "that scene is not one of the candidates"}
+        endpoint = self.endpoint_of(row["provider"])
+        if not endpoint:
+            return {"error": f"provider {row['provider']} is not set up"}
+        backup = self._backup_scene(scene_id, "shared-fingerprint")
+        try:
+            library_check.apply_fix(self.stash, scene_id, candidate_id, create_missing_performers=True, endpoint=endpoint, keep_other_endpoints=True)
+        except Exception as e:  # noqa: BLE001
+            return {"error": f"{type(e).__name__}: {e}", "backup": backup}
+        shared_fingerprint.set_status(self.db, scene_id, "retagged", note=row["tag_id"], tag_id=candidate_id)
+        history.add("info", "history", "organize", f"Scene given another provider scene (file registered at several): {row['local_title']}",
+                    scene_id=str(scene_id), scene_title=row["local_title"], details={"old": row["tag_id"], "new": candidate_id, "backup": backup})
+        return {"ok": True, "backup": backup}
+
     def _adopt(self, item):
         """Applies the provider's metadata (title/date/studio/performers/ids) and, for VR
         files, the VR tag. Idempotent for scenes that already carry the right id. The scene's metadata is saved first (_backup_scene)."""

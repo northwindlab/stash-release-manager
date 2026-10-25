@@ -29,6 +29,8 @@ def counts():
     try:
         import convert
         out["convert_open"] = convert.badge(_db)
+        import shared_fingerprint
+        out["shared_open"] = shared_fingerprint.open_count(_db)
     except Exception:
         pass
     try:

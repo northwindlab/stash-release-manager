@@ -34,6 +34,11 @@ logger = logging.getLogger(__name__)
 _phash_regen_jobs = {}
 _STALE_FILE_MARGIN = timedelta(minutes=5)
 
+# Set by main.py (v0.246.2): callable(scene, file, provider_scene_id, found, client) -- told when a file that matched its scene is also registered at OTHER
+# provider scenes (re-released footage): the match then proves little, see shared_fingerprint.py. The verdict stays "verified" (the release was asked for
+# by name); the hook records a hint (History + the Shared fingerprints list) unless the length singles the scene out.
+shared_hook = None
+
 
 def _parse_ts(value):
     try:
@@ -164,4 +169,12 @@ def verify_downloaded_file(stash_client, stashdb_client, scene_stashdb_id, file_
             "registered fingerprints for it (found in Stash as scene id %s, title %r)",
             scene_stashdb_id, file_path, scene["id"], scene["title"],
         )
+    if matched and shared_hook is not None and hasattr(stashdb_client, "find_scenes_by_fingerprints"):
+        fps = [{"hash": v, "algorithm": t.upper()} for t, v in local_fingerprints if t in ("oshash", "phash", "md5")]
+        try:
+            found = stashdb_client.find_scenes_by_fingerprints([fps])[0] if fps else []
+            if len(found) > 1 and any(f["id"] == scene_stashdb_id for f in found):
+                shared_hook(scene, matching_file, scene_stashdb_id, found, stashdb_client)
+        except Exception:
+            logger.exception("verify_downloaded_file: the check for other scenes with the same fingerprint failed (the verification stands)")
     return matched, scene["title"]

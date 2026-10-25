@@ -43,6 +43,7 @@ import film_names
 import history
 import quality_detect
 import renamer_check
+import shared_fingerprint
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +110,7 @@ def stored_checked_at(db):
 _oshash_cache = {"at": 0, "data": None}
 # The background "Recount" (v0.240.17): every studio with local candidates gets its real plan (provider data + fingerprints), so only studios with
 # something to do stay in the list.
+_shared_scan = {"running": False, "done": 0, "total": 0, "found": 0, "provider": "", "error": None, "finished_at": None}
 _recount = {"running": False, "done": 0, "total": 0, "studio": "", "phase": "", "error": None, "finished_at": None}
 
 
@@ -366,6 +368,68 @@ class Organizer:
         finally:
             _recount.update(running=False, finished_at=time.time())
 
+    # ---------- files registered at several provider scenes (v0.246.0) ----------
+
+    def start_shared_scan(self):
+        if _shared_scan["running"]:
+            return {"started": False, "running": True}
+        threading.Thread(target=self._shared_scan_run, daemon=True, name="shared-fingerprint-scan").start()
+        return {"started": True}
+
+    @staticmethod
+    def shared_scan_status():
+        return dict(_shared_scan)
+
+    def _shared_scan_run(self):
+        """Asks every set-up stash-box for the fingerprints of ALL tagged scenes and puts the ones that need a decision on the review list
+        (shared_fingerprint.py). Scenes whose length confirms the tag are not listed; open rows the scan finds fine now are settled."""
+        _shared_scan.update(running=True, done=0, total=0, found=0, provider="", error=None)
+        try:
+            for box, client in self.boxes():
+                endpoint = self.endpoint_of(box)
+                _shared_scan.update(provider=self.name_of(box), done=0)
+                scenes = self.stash.all_scenes_with_stashdb_id(endpoint)
+                rows = []
+                for s in scenes:
+                    tag = next((x["stash_id"] for x in s["stash_ids"] if x["endpoint"] == endpoint), None)
+                    f = next((f for f in s.get("files") or [] if f.get("fingerprints")), None)
+                    fps = [{"hash": x["value"], "algorithm": x["type"].upper()} for x in (f or {}).get("fingerprints", []) if x["type"] in ("oshash", "phash", "md5")]
+                    if tag and fps:
+                        rows.append((s, tag, f, fps))
+                _shared_scan["total"] = len(rows)
+                seen = set()
+                for i in range(0, len(rows), _FP_BATCH):
+                    chunk = rows[i:i + _FP_BATCH]
+                    try:
+                        results = client.find_scenes_by_fingerprints([r[3] for r in chunk])
+                    except Exception:
+                        logger.exception("shared scan: %s lookup failed", self.name_of(box))
+                        continue
+                    lengths = self._lengths(client, [m["id"] for found in results if found and len(found) > 1 for m in found])
+                    for (s, tag, f, _), found in zip(chunk, results):
+                        if found and len(found) > 1 and any(m["id"] == tag for m in found):
+                            ok, _how = self._judge_shared(box, client, s, f, tag, found, lengths)
+                            if not ok:
+                                seen.add(str(s["id"]))
+                                _shared_scan["found"] += 1
+                    _shared_scan["done"] = min(i + _FP_BATCH, len(rows))
+                    time.sleep(0.5)
+                shared_fingerprint.close_unseen(self.db, seen, box)
+            with self.db.connect() as conn:
+                conn.execute("INSERT INTO organize_state (key, value) VALUES ('shared_scan_at', datetime('now')) "
+                             "ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+        except Exception as e:  # noqa: BLE001
+            logger.exception("shared fingerprint scan failed")
+            _shared_scan["error"] = f"{type(e).__name__}: {e}"
+        finally:
+            _shared_scan.update(running=False, finished_at=time.time())
+
+    def shared_overview(self, status="open"):
+        with self.db.connect() as conn:
+            at = conn.execute("SELECT value FROM organize_state WHERE key = 'shared_scan_at'").fetchone()
+        return {"rows": shared_fingerprint.rows(self.db, status), "counts": shared_fingerprint.counts(self.db), "scanned_at": at["value"] if at else None,
+                "scan": self.shared_scan_status()}
+
     # ---------- per-studio plan ----------
 
     def _studio_folder_name(self, studio):
@@ -418,13 +482,39 @@ class Organizer:
                 except Exception:
                     logger.exception("organize: %s fingerprint lookup failed", self.name_of(box))
                     matches = [None] * len(chunk)
+                lengths = self._lengths(client, [m["id"] for found in matches if found and len(found) > 1 for m in found])
                 for (scene, file, provider_id), found in zip(chunk, matches):
                     if found and any(m.get("id") == provider_id for m in found):
-                        result[file["id"]] = (True, "fingerprint")
+                        if len(found) > 1:  # registered at several scenes: the tag being one of them proves little (v0.246.0)
+                            result[file["id"]] = self._judge_shared(box, client, scene, file, provider_id, found, lengths)
+                        else:
+                            result[file["id"]] = (True, "fingerprint")
                     else:
                         result[file["id"]] = self._verify_by_phash(client, provider_id, file,
                                                                    other=[m.get("title") for m in found or []])
         return result
+
+    def _lengths(self, client, ids):
+        """{provider scene id: seconds or None}; empty when the client cannot say."""
+        ids = sorted(set(ids))
+        if not ids or not hasattr(client, "scene_durations"):
+            return {}
+        out = {}
+        try:
+            for i in range(0, len(ids), 40):
+                out.update(client.scene_durations(ids[i:i + 40]) or {})
+        except Exception:
+            logger.exception("organize: provider lengths failed")
+        return out
+
+    def _judge_shared(self, box, client, scene, file, provider_id, found, lengths):
+        """(ok, how) for a file registered at several provider scenes; what the length cannot settle goes to the review list."""
+        verdict = shared_fingerprint.judge(file.get("duration"), provider_id, found, lengths,
+                                           kept=shared_fingerprint.is_kept(self.db, scene["id"], provider_id))
+        if not verdict["ok"]:
+            shared_fingerprint.upsert(self.db, scene["id"], scene.get("title"), file["path"], file.get("duration"), box, provider_id,
+                                      verdict["reason"], verdict["how"], shared_fingerprint.enrich(client, found, lengths))
+        return (verdict["ok"], verdict["how"])
 
     def _provider_metadata(self, scene):
         """{title, date, studio} of the scene at StashDB (or ThePornDB), or None. `studio` is the scene's OWN studio at StashDB (v0.240.23: a scene
