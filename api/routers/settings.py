@@ -285,6 +285,10 @@ DEFAULTS = {
     "transcode_hw": "auto",
     "encode_target": "nas",          # 'nas' (this sidecar encodes) or 'worker' (an encode worker on another machine, worker/srm_encode_worker.py)
     "encode_worker_wait_hours": "0", # with 'worker': after this many hours without a worker the sidecar encodes itself (0 = never)
+    # Where the encode worker machine mounts the folders the sidecar knows (sent to the worker with every job, so nothing has to be repeated on its
+    # command line): the library (the sidecar's local_media_mount) and the download folder (local_downloads_mount). Empty = the worker's --map decides.
+    "encode_worker_media_path": "",
+    "encode_worker_downloads_path": "",
     "transcode_codec": "h265",   # 'h265' (smaller files) or 'h264' (bigger, but the only hardware encoder some chips have)
     "transcode_preset": "fast",  # CPU speed: 'medium' (best), 'fast', 'veryfast'
 

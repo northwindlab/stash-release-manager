@@ -8,7 +8,8 @@ folder, writes the 1080p copy next to it, and reports progress and the result. S
 Needs ffmpeg + ffprobe and Python 3.9+ (standard library only). Uses the same encoder code as the sidecar (api/transcode.py), so Intel/AMD
 hardware encoding (VAAPI, /dev/dri) works here when the machine has it; the settings (quality, format, CPU speed, hardware) come from the sidecar.
 
---map REMOTE=LOCAL  (repeatable) translates a path as the sidecar sees it (/downloads/...) into the folder on this machine.
+--map REMOTE=LOCAL  (repeatable) translates a path as the sidecar sees it (/downloads/..., /media/...) into the folder on this machine. The sidecar also
+sends the folders named in Settings > Quality ("Library on the worker", "Downloads on the worker") with every job, so --map is only needed to override them.
 """
 import argparse
 import json
@@ -81,7 +82,58 @@ def translate(path, maps):
     return None
 
 
+def job_maps(job, maps):
+    """The --map options first, then the folders the sidecar's settings name for this machine (Settings > Quality, sent with every job)."""
+    return list(maps) + [(m["remote"], m["local"]) for m in job.get("maps") or [] if m.get("remote") and m.get("local")]
+
+
+def run_convert_job(base, name, job, maps, status):
+    """Maintenance > Convert (v0.245.0): turns an old-format library file into H.264 + AAC in an MP4 next to it; the sidecar checks it and swaps it in."""
+    src, dst = translate(job["source"], maps), translate(job["dest"], maps)
+    key = {"kind": "convert", "job_id": job["job_id"], "worker": name}
+    if not src or not dst or not os.path.exists(src):
+        call(base, "/encode-worker/done", {**key, "ok": False, "error": f"{job['source']} is not visible on this machine (set the folder under Settings > Quality, or --map)"})
+        return
+    print(f"[{time.strftime('%H:%M:%S')}] converting ({job['mode']}) {os.path.basename(src)}", flush=True)
+    last = [0.0]
+    status.set(state="encoding", file=os.path.basename(src), percent=0, speed_x=None, seconds_left=None, started_at=time.time(), error=None,
+               method=f"convert ({job['mode']})")
+
+    def progress(pct, speed, left):
+        if status.stopping:
+            raise transcode.StopEncode()
+        status.set(percent=pct, speed_x=speed, seconds_left=left)
+        if time.time() - last[0] < 5:
+            return
+        last[0] = time.time()
+        try:
+            reply = call(base, "/encode-worker/progress", {**key, "percentage": pct, "speed_x": speed, "seconds_left": left})
+        except (urllib.error.URLError, OSError, ValueError):
+            return
+        if not reply.get("ok"):
+            raise transcode.StopEncode()  # cancelled in the UI, or the lease went to someone else
+
+    started = time.time()
+    try:
+        res = transcode.convert(src, dst, job["mode"], progress=progress)
+    except Exception as e:  # never leave a half-written file behind
+        res = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+        transcode._remove(dst)
+    if res.get("error") == "stopped":
+        print("  stopped" + ("" if status.stopping else " (cancelled or given to someone else)"), flush=True)
+        transcode._remove(dst)
+        status.idle(last_result={"ok": False, "text": "stopped", "file": os.path.basename(src), "at": time.time()})
+        return
+    seconds = int(time.time() - started)
+    call_retry(base, "/encode-worker/done", {**key, "ok": res["ok"], "error": res.get("error"), "seconds": seconds})
+    status.idle(last_result={"ok": res["ok"], "text": "done" if res["ok"] else str(res.get("error")), "file": os.path.basename(src), "seconds": seconds, "at": time.time()})
+    print(f"  {'done' if res['ok'] else 'failed: ' + str(res.get('error'))} after {seconds} s", flush=True)
+
+
 def run_job(base, name, job, maps, status):
+    maps = job_maps(job, maps)
+    if job.get("kind") == "convert":
+        return run_convert_job(base, name, job, maps, status)
     provider, stash_id = job["provider"], job["stash_id"]
     src, dst = translate(job["source"], maps), translate(job["dest"], maps)
     key = {"provider": provider, "stash_id": stash_id, "worker": name}

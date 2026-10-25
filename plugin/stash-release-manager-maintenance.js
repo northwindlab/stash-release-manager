@@ -43,6 +43,7 @@
     { key: 'import', group: 'files', icon: 'faFileImport', label: 'Import folder', build: (c) => { c.appendChild(window.SRW.buildSafetyPanel({ compact: true })); c.appendChild(buildImportSection()); } },
     { key: 'organize', group: 'files', icon: 'faFolderTree', label: 'Organize library', build: (c) => { c.appendChild(window.SRW.buildSafetyPanel({ compact: true })); c.appendChild(buildOrganizeSection()); } },
     { key: 'upgrades', group: 'files', icon: 'faCircleUp', label: 'Upgrade wanted', build: (c) => c.appendChild(flatten(buildUpgradeSection())) },
+    { key: 'convert', group: 'files', icon: 'faRightLeft', label: 'Convert', build: (c) => c.appendChild(buildConvertSection()) },
     { key: 'movies', group: 'movies', icon: 'faFilm', label: 'Movies & groups', build: (c) => c.appendChild(buildMoviesSection()) },
     { key: 'duration-movies', group: 'movies', icon: 'faStopwatch', label: 'Duration: movie scenes', build: (c) => c.appendChild(buildDurationArea(true)) },
   ];
@@ -134,7 +135,7 @@
 
     // What waits for a decision (one cheap local request): numbers behind Review, Compare and Upgrade wanted, and the area opened when the
     // address names none -- the first of Review, Compare that has something open.
-    const countFor = (counts) => ({ review: counts && counts.review_open, compare: counts && counts.pairs_open, upgrades: counts && counts.upgrades_open,
+    const countFor = (counts) => ({ review: counts && counts.review_open, compare: counts && counts.pairs_open, upgrades: counts && counts.upgrades_open, convert: counts && counts.convert_open,
       'library-check': counts && counts.library_check_open, 'vr-check': counts && counts.vr_open,
       'duration-movies': counts && counts.duration_movies_open, organize: organizeBadge(counts && counts.organize_open) });
     let badges = { ...countFor(null), 'unknown-quality': unknownQualityCount };
@@ -175,7 +176,7 @@
     async function refreshBadges() {
       try {
         const fresh = countFor(await window.SRW.runOp('maintenance_counts'));
-        ['review', 'compare', 'upgrades', 'library-check', 'vr-check', 'duration-movies', 'organize'].forEach((k) => side.setBadge(k, fresh[k]));
+        ['review', 'compare', 'upgrades', 'convert', 'library-check', 'vr-check', 'duration-movies', 'organize'].forEach((k) => side.setBadge(k, fresh[k]));
       } catch (e) { /* keep the old numbers */ }
       refreshSlowBadges();
     }
@@ -2883,6 +2884,204 @@
       listSlot,
     ]);
     listSlot.appendChild(view.node);
+    return section;
+  }
+
+  // ==================== Convert (v0.245.0, api/convert.py) ====================
+  // Library files no browser plays directly (old video codec, or good H.264 in an old container) -> H.264 + AAC in an MP4, made by an encode worker
+  // (not the NAS). The Stash scene stays; the new file joins it and the old file goes to the recycle bin.
+  function buildConvertSection() {
+    const { el, confirmInline, notify } = window.SRW;
+    const status = el('span', { className: 'srw-key-status' });
+    const workerLine = el('p', { className: 'srw-hint' });
+    const list = el('div');
+    const MODE_TEXT = { reencode: ['Re-encode', 'The video is encoded again (old codec); the picture size stays'],
+                        remux: ['Repack', 'The video is already H.264 and is copied as it is; only the container (and maybe the sound) changes -- takes seconds, loses nothing'] };
+    const STATES = [['open', 'To convert'], ['active', 'Queued / running'], ['failed', 'Failed'], ['done', 'Converted'], ['dismissed', 'Dismissed']];
+    const ACTIVE = ['queued', 'running', 'verifying', 'replacing'];
+    const fmtGb = (b) => (b ? (b >= 1e9 ? `${(b / 1e9).toFixed(2)} GB` : `${Math.round(b / 1e6)} MB`) : '?');
+    const fmtMin = (sec) => (sec ? `${Math.round(sec / 60)} min` : '?');
+    let rows = [];
+    let history = { done: [], dismissed: [] };
+    let counts = { done: 0, dismissed: 0 };
+    let view = null;
+    let timer = null;
+
+    const stateSelect = el('select', { title: 'Which files to show' }, STATES.map(([k, t]) => el('option', { value: k, textContent: t })));
+    const modeSelect = el('select', { title: 'Re-encode: old video codec. Repack: good H.264 in an old container.' }, [
+      el('option', { value: '', textContent: 'All kinds' }), el('option', { value: 'reencode', textContent: 'Re-encode' }), el('option', { value: 'remux', textContent: 'Repack' })]);
+    const SORTS = [['title', 'Title', (c) => (c.scene_title || '').toLowerCase(), true], ['size', 'File size', (c) => c.size || 0, false],
+      ['length', 'Length', (c) => c.duration || 0, false], ['format', 'Format', (c) => `${c.container}/${c.video_codec}`, true]];
+    const sortSelect = el('select', { title: 'Sort the list' }, SORTS.map(([k, t]) => el('option', { value: k, textContent: `Sort: ${t}` })));
+    const sortDir = el('button', { type: 'button', className: 'srw-btn', title: 'Reverse the order', textContent: '↑',
+      onClick: () => { reversed = !reversed; sortDir.textContent = reversed ? '↓' : '↑'; view.reset(); } });
+    let reversed = false;
+    const stateOf = (c) => (c.status === 'failed' ? 'failed' : ACTIVE.includes(c.status) ? 'active' : c.status === 'done' ? 'done' : c.status === 'dismissed' ? 'dismissed' : 'open');
+    const pool = () => {
+      const st = stateSelect.value;
+      const base = st === 'done' ? history.done : st === 'dismissed' ? history.dismissed : rows;
+      return base.filter((c) => stateOf(c) === st && (!modeSelect.value || c.mode === modeSelect.value));
+    };
+    const sorted = () => {
+      const def = SORTS.find((x) => x[0] === sortSelect.value);
+      const asc = def[3] !== reversed;
+      return pool().sort((a, b) => { const x = def[2](a); const y = def[2](b); const d = typeof x === 'string' ? x.localeCompare(y) : x - y; return asc ? d : -d; });
+    };
+
+    // ---- selection ----
+    const selected = new Set();
+    let pageIds = [];
+    const selCount = el('span', { className: 'srw-bulk-count' });
+    const bulk = el('div', { className: 'srw-bulk-bar', hidden: true });
+    const pageBox = el('input', { type: 'checkbox', title: 'Select / unselect everything on this page' });
+    pageBox.addEventListener('change', () => { pageIds.forEach((id) => (pageBox.checked ? selected.add(id) : selected.delete(id))); syncSelection(); view.reload(); });
+    const allLink = el('a', { href: '#', className: 'srw-bulk-all', onClick: (e) => { e.preventDefault(); sorted().forEach((c) => selected.add(c.id)); syncSelection(); view.reload(); } });
+    function syncSelection() {
+      selCount.textContent = `${selected.size} selected`;
+      const matching = sorted();
+      allLink.textContent = selected.size < matching.length ? `Select all ${matching.length} matching` : '';
+      bulk.hidden = selected.size === 0;
+      pageBox.checked = pageIds.length > 0 && pageIds.every((id) => selected.has(id));
+    }
+    const selectedRows = () => pool().filter((c) => selected.has(c.id));
+    async function bulkOp(op, ids, done) {
+      const r = await window.SRW.runOp(op, { ids });
+      if (r.error) { notify('Convert', r.error, 'error'); return null; }
+      selected.clear();
+      await load();
+      if (done) notify('Convert', done(r), 'success');
+      return r;
+    }
+    const estimate = (cs) => {
+      const re = cs.filter((c) => c.mode === 'reencode');
+      const minutes = Math.round(re.reduce((a, c) => a + (c.duration || 0), 0) / 60 / 4); // rough: an old low-resolution file encodes at about 4x
+      return `${cs.length} file(s), ${re.length} to re-encode (roughly ${minutes < 90 ? `${minutes} min` : `${(minutes / 60).toFixed(1)} h`} of encoding at 4x), ${cs.length - re.length} to repack`;
+    };
+    const convertBtn = el('button', { type: 'button', className: 'srw-btn srw-btn-primary', textContent: 'Convert', title: 'Queue the selected files; an encode worker converts them one after the other',
+      onClick: (e) => confirmInline(e.currentTarget,
+        `Convert ${estimate(selectedRows())}? The scene stays, the converted file joins it and the old file goes to the recycle bin. Needs an encode worker.`,
+        () => bulkOp('convert_queue', [...selected], (r) => `${r.queued} file(s) queued`)) });
+    const cancelBtn = el('button', { type: 'button', className: 'srw-btn', textContent: 'Cancel', title: 'Take the selected queued / running files out of the queue (a running conversion is stopped)',
+      onClick: () => bulkOp('convert_cancel', [...selected], (r) => `${r.cancelled} file(s) taken out of the queue`) });
+    const dismissBtn = el('button', { type: 'button', className: 'btn btn-outline-danger srw-btn-fit', textContent: 'Dismiss', title: 'Keep these files as they are; they leave the list',
+      onClick: (e) => confirmInline(e.currentTarget, `Dismiss ${selected.size} file(s)? They stay as they are and are not offered again (restore them under Dismissed).`,
+        () => bulkOp('convert_dismiss', [...selected], (r) => `${r.changed} file(s) dismissed`)) });
+    const restoreBtn = el('button', { type: 'button', className: 'srw-btn', textContent: 'Restore', title: 'Offer the selected dismissed files again',
+      onClick: async () => { const r = await window.SRW.runOp('convert_dismiss', { ids: [...selected], restore: true }); if (r.error) { notify('Convert', r.error, 'error'); return; } selected.clear(); load(); } });
+    const clearBtn = el('button', { type: 'button', className: 'srw-btn', textContent: 'Clear selection', onClick: () => { selected.clear(); syncSelection(); view.reload(); } });
+    bulk.append(selCount, allLink, convertBtn, cancelBtn, dismissBtn, restoreBtn, clearBtn);
+    function syncBulkButtons() {
+      const st = stateSelect.value;
+      convertBtn.hidden = !(st === 'open' || st === 'failed');
+      cancelBtn.hidden = st !== 'active';
+      dismissBtn.hidden = !(st === 'open' || st === 'failed');
+      restoreBtn.hidden = st !== 'dismissed';
+    }
+
+    // ---- the data ----
+    const refreshBtn = el('button', { type: 'button', className: 'srw-btn', textContent: 'Find candidates',
+      title: 'Reads every file from Stash and lists those that no browser plays directly (nothing is changed). Files already in Upgrade wanted are left out.',
+      onClick: async () => {
+        refreshBtn.disabled = true; window.SRW.setBusy(status, 'reading Stash…');
+        const r = await window.SRW.runOp('convert_refresh');
+        refreshBtn.disabled = false; status.textContent = '';
+        if (r.error) { notify('Convert', r.error, 'error'); return; }
+        if (r.skipped) { notify('Convert', r.reason, 'info'); return; }
+        notify('Convert', `${r.wanted} file(s) to convert (${r.reencode} to re-encode, ${r.remux} to repack); ${r.added} new, ${r.removed} gone.`, 'success');
+        load();
+      } });
+    async function loadHistory(kind) {
+      const r = await window.SRW.runOp('convert_history', { status: kind });
+      if (!r.error) history[kind] = r.rows || [];
+    }
+    async function load() {
+      const r = await window.SRW.runOp('convert_list');
+      if (r.error) { status.textContent = ` error: ${r.error}`; return; }
+      rows = r.rows || [];
+      counts = { done: r.done, dismissed: r.dismissed };
+      if (stateSelect.value === 'done' || stateSelect.value === 'dismissed') await loadHistory(stateSelect.value);
+      const w = r.worker || {};
+      workerLine.textContent = (w.online ? `Encode worker online${w.name ? `: ${w.name}` : ''}.` : `No encode worker is asking right now${w.name ? ` (last: ${w.name}, ${w.seconds_ago == null ? '' : `${Math.round(w.seconds_ago / 60)} min ago`})` : ''} -- queued files wait for one.`)
+        + (r.media_path_set ? '' : ' The folder of the library on the worker machine is not set yet (Settings > Quality > "Library on the worker"); without it the worker needs --map /media=<folder>.');
+      workerLine.className = w.online && r.media_path_set ? 'srw-hint' : 'srw-review-warning';
+      [...stateSelect.options].forEach((o) => {
+        const n = o.value === 'done' ? counts.done : o.value === 'dismissed' ? counts.dismissed : rows.filter((c) => stateOf(c) === o.value).length;
+        o.textContent = `${STATES.find((x) => x[0] === o.value)[1]} (${n})`;
+      });
+      for (const id of [...selected]) if (!rows.concat(history.done, history.dismissed).some((c) => c.id === id)) selected.delete(id);
+      if (!view) {
+        view = window.SRW.buildFilteredPagedList({
+          filters: ['search'], perPage: 30, showFilterBarFrom: 10,
+          emptyText: 'Nothing here (click "Find candidates" to read the library).',
+          fetchPage: window.SRW.localPageFetcher(() => sorted(), { text: (c) => `${c.scene_title} ${c.file_path}` }),
+          renderItems: (items) => { pageIds = items.map((c) => c.id); syncSelection();
+            return el('ul', { className: 'srw-release-list srw-upgrade-list' }, [el('li', { className: 'srw-upgrade-selectall' }, [el('label', {}, [pageBox, ' select this page'])]), ...items.map(buildRow)]); },
+        });
+        list.appendChild(view.node);
+        [stateSelect, modeSelect].forEach((s) => s.addEventListener('change', async () => {
+          if (s === stateSelect && (s.value === 'done' || s.value === 'dismissed')) await loadHistory(s.value);
+          selected.clear(); syncBulkButtons(); view.reset(); }));
+        sortSelect.addEventListener('change', () => view.reset());
+      }
+      syncBulkButtons();
+      view.reload();
+      syncSelection();
+      // Progress: asked again every few seconds while something is queued or running (and only while this page is on screen).
+      const busy = rows.some((c) => ACTIVE.includes(c.status));
+      if (busy && !timer) timer = setInterval(() => { if (!section.isConnected) { clearInterval(timer); timer = null; return; } load(); }, 5000);
+      if (!busy && timer) { clearInterval(timer); timer = null; }
+    }
+
+    function buildRow(c) {
+      const [modeLabel, modeTitle] = MODE_TEXT[c.mode] || [c.mode, ''];
+      const cb = el('input', { type: 'checkbox', title: 'Select' });
+      cb.checked = selected.has(c.id);
+      cb.addEventListener('change', () => { if (cb.checked) selected.add(c.id); else selected.delete(c.id); syncSelection(); });
+      const facts = [`${c.container}/${c.video_codec}/${c.audio_codec || 'no sound'}`, c.width && c.height ? `${c.width}x${c.height}` : null, fmtGb(c.size), fmtMin(c.duration),
+        c.bit_rate ? `${(c.bit_rate / 1e6).toFixed(1)} Mbit/s` : null].filter(Boolean);
+      const note = {
+        wanted: '', failed: c.error || 'failed', queued: 'waiting for an encode worker', verifying: 'checking the converted file…', replacing: 'putting the converted file into the scene…',
+        running: `${c.worker || 'worker'}: ${c.percentage || 0} %${c.speed_x ? ` (${c.speed_x}x)` : ''}${c.seconds_left ? `, about ${Math.max(1, Math.round(c.seconds_left / 60))} min left` : ''}`,
+        done: `converted: ${fmtGb(c.size)} -> ${fmtGb(c.size_after)}; the old file is in the recycle bin`, dismissed: 'dismissed -- the file is kept as it is',
+      }[c.status] || c.status;
+      const actions = [];
+      if (c.status === 'wanted' || c.status === 'failed') {
+        actions.push(el('button', { type: 'button', className: 'srw-btn srw-btn-primary', textContent: 'Convert', title: 'Queue this file for an encode worker',
+          onClick: (e) => confirmInline(e.currentTarget, `Convert "${c.scene_title || c.file_path.split('/').pop()}" (${modeLabel.toLowerCase()})? The scene stays and the old file goes to the recycle bin.`,
+            async () => { const r = await window.SRW.runOp('convert_queue', { ids: [c.id] }); if (r.error) { notify('Convert', r.error, 'error'); return; } load(); }) }));
+        actions.push(el('button', { type: 'button', className: 'btn btn-outline-danger srw-btn-fit srw-btn-dismiss', textContent: 'Dismiss', title: 'Keep the file as it is',
+          onClick: async () => { await window.SRW.runOp('convert_dismiss', { ids: [c.id] }); await load();
+            window.SRW.dismissedNotice(`Dismissed: ${c.scene_title || 'file'}`, 'The file is kept as it is.', () => window.SRW.runOp('convert_dismiss', { ids: [c.id], restore: true }), () => load()); } }));
+      } else if (c.status === 'queued' || c.status === 'running') {
+        actions.push(el('button', { type: 'button', className: 'srw-btn', textContent: 'Cancel', title: c.status === 'running' ? 'Stop this conversion' : 'Take it out of the queue',
+          onClick: async () => { await window.SRW.runOp('convert_cancel', { ids: [c.id] }); load(); } }));
+      } else if (c.status === 'dismissed') {
+        actions.push(el('button', { type: 'button', className: 'srw-btn', textContent: 'Restore', onClick: async () => { await window.SRW.runOp('convert_dismiss', { ids: [c.id], restore: true }); load(); } }));
+      }
+      return el('li', { className: 'srw-release-row srw-upgrade-row' }, [
+        el('div', { className: 'srw-rr-main' }, [
+          el('div', {}, [cb, ' ', el('a', { href: `/scenes/${c.scene_id}`, textContent: c.scene_title || c.file_path.split('/').pop() }), ' ',
+            el('span', { className: 'srw-chip', textContent: modeLabel, title: modeTitle })]),
+          el('div', { className: 'srw-hint', textContent: c.file_path }),
+          el('div', { className: 'srw-chips' }, facts.map((t) => el('span', { className: 'srw-chip', textContent: t }))),
+          note ? el('div', { className: c.status === 'failed' ? 'srw-review-warning' : 'srw-hint', textContent: note }) : null,
+        ]),
+        el('div', { className: 'srw-rr-actions' }, [window.SRW.buildStashLink('scene', c.scene_id, 'Play in Stash'), ...actions]),
+      ]);
+    }
+
+    const section = el('div', { className: 'srw-panel srw-convert' }, [
+      el('p', {
+        className: 'srw-hint',
+        textContent: 'Files that no browser plays directly: an old video codec (MPEG-4 in AVI, WMV, FLV, MPEG-1 ...) is encoded again as H.264 + AAC in an MP4 of the same size; good H.264 in an old container (FLV ...) is only repacked. '
+          + 'The work is done by an encode worker on another machine (not the NAS). The Stash scene stays: the converted file joins it, and the old file goes to the recycle bin. HEVC and VR files and files that only have AC3 sound are not part of this page.',
+      }),
+      workerLine,
+      el('div', { className: 'srw-toolbar' }, [refreshBtn, stateSelect, modeSelect, sortSelect, sortDir, status]),
+      bulk,
+      list,
+    ]);
+    load();
     return section;
   }
 

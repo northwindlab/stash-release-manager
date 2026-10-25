@@ -871,6 +871,9 @@ def _run_check(run_id, paths, provider="stashdb"):
     try:
         stashdb_client, prow = _resolve_provider(provider)
         scenes = library_check.list_scenes_in_scope(stash_client, paths, prow["endpoint"])
+        import convert
+        made_here = convert.converted_paths(_db)  # files the Convert page produced have new hashes (the provider cannot know them): not judged
+        scenes = [s for s in scenes if not (s.get("files") and all(f["path"] in made_here for f in s["files"]))]
         library_check_repo.update_run_progress(_db, run_id, 0, len(scenes))
         matches, mismatches, ambiguous, unverifiable = library_check.find_library_mismatches(
             stashdb_client, scenes, prow["endpoint"],

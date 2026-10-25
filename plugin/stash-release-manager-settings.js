@@ -1686,19 +1686,22 @@
         className: 'srw-hint',
         textContent: 'When nothing in the profile exists for a scene that is at least this many days old, a 2160p release is taken and scaled down to 1080p HEVC before the import '
           + '(the original is not kept; the file has new hashes, so it is checked by its perceptual hash with a tolerance), and an SD release is taken as it is. 0 = off. '
-          + 'The re-encode uses a quality target (variable bitrate): lower number = better and larger, 24 is a good start. Hardware encoding (Intel/AMD via /dev/dri) is used when it works, else the CPU. CPU speed: "veryfast" is several times quicker than "medium" for slightly larger files. H.264 gives larger files than H.265 but some chips can only encode that in hardware (try it if H.265 says "hardware not available"). "Where to encode" = encode worker hands the work to a faster machine running worker/srm_encode_worker.py (see INSTALL.md); while it is off, the download just waits.',
+          + 'The re-encode uses a quality target (variable bitrate): lower number = better and larger, 24 is a good start. Hardware encoding (Intel/AMD via /dev/dri) is used when it works, else the CPU. CPU speed: "veryfast" is several times quicker than "medium" for slightly larger files. H.264 gives larger files than H.265 but some chips can only encode that in hardware (try it if H.265 says "hardware not available"). "Where to encode" = encode worker hands the work to a faster machine running worker/srm_encode_worker.py (see INSTALL.md); while it is off, the download just waits. "Library on the worker" / "Downloads on the worker" tell the worker where it finds the sidecar\'s /media and /downloads folders on its own machine (sent with every job; the worker needs no --map then). Maintenance > Convert always uses a worker.',
       }));
       [['fallback_resolution_days', 'Days after the release date (0 = off)', 'number', '10', { min: '0', max: '365', step: '1' }],
         ['fallback_accept_sd', 'Accept SD as a last resort', 'select', 'true', { options: [['true', 'Yes'], ['false', 'No']] }],
         ['transcode_quality', 'Re-encode quality (16-32, lower = better)', 'number', '24', { min: '16', max: '32', step: '1' }],
         ['encode_target', 'Where to encode', 'select', 'nas', { options: [['nas', 'On this sidecar (the NAS)'], ['worker', 'On an encode worker (another machine)']] }],
         ['encode_worker_wait_hours', 'Encode here if no worker takes it within (hours, 0 = never)', 'number', '0', { min: '0', max: '720', step: '1' }],
+        ['encode_worker_media_path', 'Library on the worker (folder as the worker machine sees it, e.g. /mnt/nas/library)', 'text', '', { placeholder: '/mnt/nas/library' }],
+        ['encode_worker_downloads_path', 'Downloads on the worker (folder as the worker machine sees it)', 'text', '', { placeholder: '/mnt/nas/download/complete' }],
         ['transcode_codec', 'Re-encode format', 'select', 'h265', { options: [['h265', 'H.265 (HEVC, smaller files)'], ['h264', 'H.264 (larger files)']] }],
         ['transcode_preset', 'CPU speed', 'select', 'fast', { options: [['medium', 'Medium (best quality per size, slow)'], ['fast', 'Fast'], ['veryfast', 'Very fast (larger files)']] }],
         ['transcode_hw', 'Hardware encoding', 'select', 'auto', { options: [['auto', 'Automatic (when it works)'], ['off', 'Off (CPU only)']] }]].forEach(([key, label, kind, def, o]) => {
         const input = kind === 'select'
           ? el('select', {}, o.options.map(([v, text]) => el('option', { value: v, textContent: text })))
-          : el('input', { type: 'number', min: o.min, max: o.max, step: o.step });
+          : kind === 'text' ? el('input', { type: 'text', placeholder: o.placeholder || '', style: 'width: 22rem' })
+            : el('input', { type: 'number', min: o.min, max: o.max, step: o.step });
         input.value = settings[key] || def;
         const status = el('span', { className: 'srw-key-status' });
         assignWrap.appendChild(el('label', {}, [`${label}: `, input]));

@@ -538,6 +538,17 @@ def main():
     elif mode == "compare_remove_id":
         result = _post(sidecar_url, f"/maintenance/compare/pair/{args.get('id')}/remove-id",
                        {"scene_id": args.get("scene_id"), "stash_id": args.get("stash_id")}, timeout=60)
+    elif mode == "convert_list":
+        result = _get(sidecar_url, "/maintenance/convert", timeout=30)
+    elif mode == "convert_history":
+        result = _get(sidecar_url, f"/maintenance/convert/history?status={args.get('status') or 'done'}", timeout=30)
+    elif mode == "convert_refresh":
+        result = _post(sidecar_url, "/maintenance/convert/refresh", {}, timeout=300)
+    elif mode in ("convert_queue", "convert_cancel", "convert_dismiss"):
+        body = {"ids": args.get("ids") or []}
+        if mode == "convert_dismiss":
+            body["restore"] = bool(args.get("restore"))
+        result = _post(sidecar_url, "/maintenance/convert/" + mode.split("_", 1)[1], body, timeout=60)
     elif mode == "upgrades_list":
         result = _get(sidecar_url, "/maintenance/upgrades", timeout=30)
     elif mode == "upgrades_refresh":

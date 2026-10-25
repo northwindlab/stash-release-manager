@@ -43,8 +43,16 @@ def probe(path, timeout=60):
     except ValueError:
         duration = 0.0
     transfer = video.get("color_transfer") or ""
+    try:
+        bit_rate = int(float((data.get("format") or {}).get("bit_rate") or 0))
+    except ValueError:
+        bit_rate = 0
+    try:
+        abitrate = int(float((audio or {}).get("bit_rate") or 0))
+    except ValueError:
+        abitrate = 0
     return {"width": video.get("width"), "height": video.get("height"), "duration": duration, "vcodec": video.get("codec_name"),
-            "acodec": audio.get("codec_name") if audio else None,
+            "acodec": audio.get("codec_name") if audio else None, "bit_rate": bit_rate, "abitrate": abitrate,
             "hdr": transfer in ("smpte2084", "arib-std-b67"),
             "color": {"color_primaries": video.get("color_primaries"), "color_trc": transfer, "colorspace": video.get("color_space")}}
 
@@ -241,3 +249,83 @@ def _run(cmd, info, progress, timeout_hours):
     if proc.returncode != 0:
         return (err_lines[-1].strip() if err_lines else f"ffmpeg exited with {proc.returncode}")[:300]
     return None
+
+
+# ---------- Convert (v0.245.0): files no browser plays directly -> H.264 + AAC in an MP4 of the same size ----------
+
+CONVERT_CRF = 20
+CONVERT_AUDIO_KEEP = ("aac", "mp3")  # an mp4 carries both, and a browser plays both: copied as they are
+CONVERT_MAXRATE_FACTOR = 1.0  # ceiling = the source's own bit rate: x264 does at least as well as the old codec with the same bits
+CONVERT_MIN_MAXRATE = 250_000  # bit/s: floor for a tiny source
+CONVERT_AUDIO_MIN, CONVERT_AUDIO_MAX, CONVERT_AUDIO_UNKNOWN = 48_000, 128_000, 96_000  # AAC bit rate: as the source's, within these limits
+
+
+def convert_mode(vcodec, acodec):
+    """'remux' when the video is already something a browser decodes (H.264) and only the container is old, else 'reencode'."""
+    return "remux" if (vcodec or "").lower() == "h264" else "reencode"
+
+
+def convert_output_path(src):
+    """Next to the source, same name, `.mp4`. A source that already is `<name>.mp4` (old codec inside an mp4) gets a temporary name; the caller renames it
+    after the old file is out of the way."""
+    stem, ext = os.path.splitext(src)
+    return stem + (".srm-convert.mp4" if ext.lower() == ".mp4" else ".mp4")
+
+
+def convert_audio_bitrate(info):
+    """AAC bit rate for a converted file: the source's own audio bit rate (a 48 kbit/s WMA must not become a 128 kbit/s AAC), kept between 48 and 128 kbit/s;
+    96 kbit/s when the source does not say."""
+    source = info.get("abitrate") or 0
+    return CONVERT_AUDIO_UNKNOWN if not source else min(max(int(source), CONVERT_AUDIO_MIN), CONVERT_AUDIO_MAX)
+
+
+def build_convert_command(src, dst, info, mode):
+    """ffmpeg command line of a convert job. Same size as the source (nothing is scaled; odd sizes are made even), first video and first audio
+    stream, no subtitles. 'reencode': x264 CRF %d with a ceiling of the source's own bit rate so a noisy old file cannot grow; 'remux': video copied.
+    Audio: aac/mp3 copied, anything else (wma, mp2, ac3 ...) encoded to AAC at the source's own bit rate (48-128 kbit/s, see convert_audio_bitrate). `+faststart`: the browser can start playing at once.""" % CONVERT_CRF
+    cmd = ["ffmpeg", "-y", "-v", "error", "-nostdin", "-progress", "pipe:1", "-nostats", "-i", src, "-map", "0:v:0", "-map", "0:a:0?"]
+    if mode == "remux":
+        cmd += ["-c:v", "copy"]
+    else:
+        maxrate = max(int((info.get("bit_rate") or 0) * CONVERT_MAXRATE_FACTOR), CONVERT_MIN_MAXRATE)
+        cmd += ["-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2", "-c:v", "libx264", "-preset", "medium", "-crf", str(CONVERT_CRF),
+                "-maxrate", str(maxrate), "-bufsize", str(maxrate * 2), "-pix_fmt", "yuv420p"]
+    cmd += ["-c:a", "copy"] if (info.get("acodec") in CONVERT_AUDIO_KEEP or not info.get("acodec")) else ["-c:a", "aac", "-b:a", str(convert_audio_bitrate(info))]
+    cmd += ["-sn", "-map_metadata", "0", "-movflags", "+faststart", dst]
+    return cmd
+
+
+def verify_convert(dst, source_info):
+    """None when the converted file looks right (readable, H.264 video, same length and picture shape, sound when the source had some, decodes
+    without errors), else the reason."""
+    out = probe(dst)
+    if not out:
+        return "the converted file cannot be read"
+    if out["vcodec"] != "h264":
+        return f"the converted file has {out['vcodec']} video, not H.264"
+    if source_info.get("acodec") and out["acodec"] not in ("aac", "mp3"):
+        return "the converted file lost its sound"
+    if source_info["duration"] and abs(out["duration"] - source_info["duration"]) > max(2.0, source_info["duration"] * 0.01):
+        return f"the converted file is {out['duration']:.0f} s long, the original {source_info['duration']:.0f} s"
+    sw, sh = source_info["width"], source_info["height"]
+    if abs(out["width"] - sw) > 2 or abs(out["height"] - sh) > 2:
+        return f"the converted file is {out['width']}x{out['height']}, the original {sw}x{sh}"
+    bad = decode_problem(dst)
+    return f"the converted video is damaged ({bad})" if bad else None
+
+
+def convert(src, dst, mode, progress=None, timeout_hours=12, info=None):
+    """Converts `src` to `dst` (see build_convert_command). Returns {"ok": True, "seconds", "info", "out"} or {"ok": False, "error"}; never raises and
+    removes a half-written or failed dst. Software only (x264): an old low-resolution file does not need a GPU."""
+    info = info or probe(src)
+    if not info or not info.get("width") or not info.get("height"):
+        return {"ok": False, "error": "the file cannot be read by ffprobe"}
+    started = time.time()
+    with _encode_lock:
+        res = _run(build_convert_command(src, dst, info, mode), info, progress, timeout_hours)
+    if res is None:
+        res = verify_convert(dst, info)
+        if res is None:
+            return {"ok": True, "seconds": int(time.time() - started), "info": info, "out": probe(dst)}
+    _remove(dst)
+    return {"ok": False, "error": res}

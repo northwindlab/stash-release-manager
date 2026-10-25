@@ -202,6 +202,8 @@ A re-encode of a 2160p download takes about an hour on a small NAS. The re-encod
 python3 worker/srm_encode_worker.py --sidecar http://NAS:6961 --map /downloads=/path/to/the/mounted/download/folder
 ```
 
+Instead of `--map` you can enter the folders once in the sidecar: Settings > Quality > **Downloads on the worker** and **Library on the worker** (where the worker machine mounts the download folder and the library). They are sent with every job; `--map` on the command line wins if both are given. **Maintenance > Convert** (old video formats to H.264 + AAC, see FIRST_STEPS.md) always runs on a worker and needs the library folder.
+
 The worker asks the sidecar every 30 seconds for waiting encodes, encodes with the settings from the sidecar (quality, format, CPU speed, hardware) and reports progress and the result. The machine can be off: the jobs wait. Switch it on and start the worker again. When the worker is done, the sidecar checks the file itself and imports it. There is no login on the sidecar's address (like the rest of it): use it only in your own network.
 
 ## Browser userscript for stash-box sites (optional)

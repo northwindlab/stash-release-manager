@@ -133,6 +133,42 @@ CREATE TABLE IF NOT EXISTS upgrade_candidate (
     UNIQUE (scene_id, file_path)
 );
 
+-- Convert (v0.245.0, see convert.py): library files no browser plays directly (old video codec or container) that an encode worker turns into
+-- H.264 + AAC in an MP4. One row per file: it is the candidate AND the job. mode: 'reencode' | 'remux'. status: 'wanted' (listed), 'queued' (the
+-- user asked), 'running' (a worker has it), 'verifying' / 'replacing' (the sidecar checks the file / swaps it into the scene), 'done', 'failed',
+-- 'dismissed' (the user does not want it converted).
+CREATE TABLE IF NOT EXISTS convert_candidate (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    scene_id       TEXT NOT NULL,
+    file_id        TEXT,
+    file_path      TEXT NOT NULL,
+    scene_title    TEXT NOT NULL DEFAULT '',
+    container      TEXT,
+    video_codec    TEXT,
+    audio_codec    TEXT,
+    width          INTEGER,
+    height         INTEGER,
+    size           INTEGER,
+    bit_rate       INTEGER,
+    duration       REAL,
+    mode           TEXT NOT NULL,
+    status         TEXT NOT NULL DEFAULT 'wanted',
+    error          TEXT,
+    new_path       TEXT,
+    size_after     INTEGER,
+    worker         TEXT,
+    percentage     INTEGER,
+    speed_x        REAL,
+    seconds_left   INTEGER,
+    beat_at        REAL,
+    queued_at      TEXT,
+    started_at     TEXT,
+    finished_at    TEXT,
+    created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (scene_id, file_path)
+);
+CREATE INDEX IF NOT EXISTS idx_convert_status ON convert_candidate(status);
+
 -- Maintenance check "VR scene, but the file is 2D" (2026-09-26, see
 -- vr_check.py) -- one row per checked file: analysis cache (size +
 -- mod_time decide whether it needs re-checking) and finding at once.
