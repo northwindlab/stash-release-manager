@@ -264,7 +264,7 @@ class Importer(Organizer):
         return out
 
     def _identify(self, scenes, exact_only=False):
-        """{file_id: {"provider", "matches"}} -- StashDB's reverse lookup, then ThePornDB's for what StashDB does not know. `exact_only` leaves out
+        """{file_id: {"provider", "matches"}} -- StashDB's reverse lookup, then the user-added stash-boxes', then ThePornDB's for what none of them knows. `exact_only` leaves out
         ThePornDB's PHASH lookup (similarity-based): a bulk assignment must rest on exact hashes (v0.243.2)."""
         pairs = []
         for s in scenes:
@@ -274,16 +274,19 @@ class Importer(Organizer):
             if fps:
                 pairs.append((f["id"], fps))
         found = {}
-        for i in range(0, len(pairs) if self.stashdb is not None else 0, _FP_BATCH):  # no StashDB set up (ThePornDB only): straight to ThePornDB
-            chunk = pairs[i:i + _FP_BATCH]
-            try:
-                matches = self.stashdb.find_scenes_by_fingerprints([p[1] for p in chunk])
-            except Exception:
-                logger.exception("import: StashDB fingerprint lookup failed")
-                matches = [None] * len(chunk)
-            for (fid, _), m in zip(chunk, matches):
-                found[fid] = {"provider": "stashdb", "matches": m or []}
-            time.sleep(0.5)
+        for box, client in self.boxes():  # StashDB first (when set up), then the user-added stash-boxes, each only for what is still unknown
+            todo = [p for p in pairs if not found.get(p[0], {}).get("matches")]
+            for i in range(0, len(todo), _FP_BATCH):
+                chunk = todo[i:i + _FP_BATCH]
+                try:
+                    matches = client.find_scenes_by_fingerprints([p[1] for p in chunk])
+                except Exception:
+                    logger.exception("import: %s fingerprint lookup failed", self.name_of(box))
+                    matches = [None] * len(chunk)
+                for (fid, _), m in zip(chunk, matches):
+                    if m or fid not in found:
+                        found[fid] = {"provider": box, "matches": m or []}
+                time.sleep(0.5)
         # ThePornDB for everything StashDB doesn't know (oshash first, then phash)
         if self.theporndb is not None:
             for s in scenes:
@@ -309,6 +312,9 @@ class Importer(Organizer):
             return "stashdb", stashdb_id
         if self.stash.stashdb_endpoint in ids:
             return "stashdb", ids[self.stash.stashdb_endpoint]
+        for e in self.extra_providers:
+            if e["endpoint"] in ids:
+                return e["key"], ids[e["endpoint"]]
         if self.stash.theporndb_endpoint in ids and self.theporndb is not None:
             return "theporndb", ids[self.stash.theporndb_endpoint]
         return None, None
@@ -323,7 +329,7 @@ class Importer(Organizer):
         key = (provider, sid)
         if key in cache:
             return cache[key]
-        client = self.stashdb if provider == "stashdb" else self.theporndb
+        client = self.client_of(provider)
         if client is None:
             return None, None
         detail = _with_retry(client.get_scene_detail, sid)
@@ -337,8 +343,7 @@ class Importer(Organizer):
                     name = self.stashdb.get_studio_name(studio["id"])
             else:
                 import file_importer
-                name = file_importer._studio_name_for_naming(self.stash, self.stashdb, "theporndb",
-                                                             self.theporndb, detail)
+                name = file_importer._studio_name_for_naming(self.stash, self.stashdb, provider, client, detail)
         except Exception:
             logger.exception("import: studio name for %s", studio)
         cache[key] = (detail, name or studio.get("name"))
@@ -369,8 +374,8 @@ class Importer(Organizer):
         provider fingerprint lookup: `identify=False`)."""
         scenes = [s for s in candidates if len(s["files"]) == 1]
         multi = [s for s in candidates if len(s["files"]) != 1]
-        with_id = [s for s in scenes if any(x["endpoint"] in (self.stash.stashdb_endpoint, self.stash.theporndb_endpoint)
-                                            for x in s["stash_ids"])]
+        known = {self.stash.stashdb_endpoint, self.stash.theporndb_endpoint, *[e["endpoint"] for e in self.extra_providers]}
+        with_id = [s for s in scenes if any(x["endpoint"] in known for x in s["stash_ids"])]
         movie_scenes = [s for s in scenes if s not in with_id and len(s.get("groups") or []) == 1]
         without_id = [s for s in scenes if s not in with_id and s not in movie_scenes]
         verified = self._verify([(s, s["files"][0]) for s in with_id])
@@ -450,7 +455,7 @@ class Importer(Organizer):
         for i in items:
             if i["kind"] != "identify" and not (i["kind"] == "ready" and i["provider_id"]):
                 continue
-            endpoint = self.stash.stashdb_endpoint if i["provider"] == "stashdb" else self.stash.theporndb_endpoint
+            endpoint = self.endpoint_of(i["provider"])
             try:
                 other = self.stash.find_scene_by_stashdb_id(i["provider_id"], endpoint)
             except Exception:
@@ -524,8 +529,8 @@ class Importer(Organizer):
         # A scene identified only at ThePornDB (no StashDB id, no id on the scene yet) would lose its provider here:
         # hand the matched ThePornDB id to the lookup.
         lookup = scene
-        if item.get("provider") == "theporndb" and item.get("provider_id") and not item["stashdb_id"]:
-            lookup = {**scene, "stash_ids": list(scene["stash_ids"]) + [{"endpoint": self.stash.theporndb_endpoint,
+        if item.get("provider") not in (None, "stashdb") and item.get("provider_id") and not item["stashdb_id"]:
+            lookup = {**scene, "stash_ids": list(scene["stash_ids"]) + [{"endpoint": self.endpoint_of(item["provider"]),
                                                                           "stash_id": item["provider_id"]}]}
         try:
             detail, studio = self._provider_scene(lookup, item["stashdb_id"])
@@ -695,7 +700,8 @@ class Importer(Organizer):
             cands = []
             if tokens:
                 term = " ".join(tokens[:6])
-                for prov, client in (("stashdb", self.stashdb), ("theporndb", self.theporndb)):
+                for prov, client in (("stashdb", self.stashdb), *[(e["key"], e["client"]) for e in self.extra_providers],
+                                     ("theporndb", self.theporndb)):
                     if client is None:
                         continue
                     try:
@@ -741,7 +747,7 @@ class Importer(Organizer):
         files, the VR tag. Idempotent for scenes that already carry the right id. The scene's metadata is saved first (_backup_scene)."""
         scene_id = item["scene_id"]
         item["backup"] = self._backup_scene(scene_id, "import-trusted" if item.get("trusted_reason") else "import")
-        endpoint = self.stash.stashdb_endpoint if item["provider"] == "stashdb" else self.stash.theporndb_endpoint
+        endpoint = self.endpoint_of(item["provider"])
         library_check.apply_fix(self.stash, scene_id, item["provider_id"], create_missing_performers=True,
                                 endpoint=endpoint, keep_other_endpoints=True)
         if item.get("vr"):
@@ -774,7 +780,7 @@ class Importer(Organizer):
                 pick = (picks or {}).get(str(item["scene_id"]))
                 if not pick or item["kind"] not in ("unknown", "review") or str(item["scene_id"]) not in scenes:
                     continue
-                if pick.get("provider") not in ("stashdb", "theporndb") or not pick.get("provider_id"):
+                if not self.endpoint_of(pick.get("provider")) or not pick.get("provider_id"):
                     continue
                 s = scenes[str(item["scene_id"])]
                 item.update(kind="identify", provider=pick["provider"], provider_id=pick["provider_id"],
@@ -868,7 +874,8 @@ class Importer(Organizer):
         item = plan["items"][0]
         if item["kind"] not in ("movie", "ready"):
             # a scene of the Whisparr library folder (scenes/) with a provider id: the Organize library engine plans it (v0.203.0)
-            plain = Organizer(self.db, self.stash, self.stashdb, self.theporndb, self.to_local, self.setting, get_whisparr_client=self.get_whisparr)
+            plain = Organizer(self.db, self.stash, self.stashdb, self.theporndb, self.to_local, self.setting, get_whisparr_client=self.get_whisparr,
+                             extra_providers=self.extra_providers)
             plain.DRIFT_WATCH_SECONDS = self.DRIFT_WATCH_SECONDS
             handled = plain.organized_library_scene(scene, mode)
             if handled.get("handled"):

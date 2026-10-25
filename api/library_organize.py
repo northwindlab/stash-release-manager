@@ -123,15 +123,50 @@ def _older_than_release(file, scene_date, slack_days=60):
 
 
 class Organizer:
+    extra_providers = ()  # user-added stash-boxes, see __init__
     def __init__(self, db, stash_client, stashdb_client, theporndb_client, to_local, settings_getter,
-                 get_whisparr_client=None):
+                 get_whisparr_client=None, extra_providers=None):
         self.get_whisparr = get_whisparr_client
+        self.extra_providers = list(extra_providers or [])  # user-added stash-boxes: [{"key", "name", "endpoint", "client"}] (v0.244.0)
         self.db = db
         self.stash = stash_client
         self.stashdb = stashdb_client
         self.theporndb = theporndb_client
         self.to_local = to_local
         self.setting = settings_getter  # (key) -> value
+
+    # ---------- the providers the fingerprint tools ask (v0.244.0) ----------
+
+    def endpoint_of(self, provider):
+        """The Stash endpoint a provider's scene ids live on (StashDB, ThePornDB or a user-added stash-box); None when unknown."""
+        if provider == "stashdb":
+            return self.stash.stashdb_endpoint
+        if provider == "theporndb":
+            return self.stash.theporndb_endpoint
+        return next((e["endpoint"] for e in self.extra_providers if e["key"] == provider), None)
+
+    def client_of(self, provider):
+        if provider == "stashdb":
+            return self.stashdb
+        if provider == "theporndb":
+            return self.theporndb
+        return next((e["client"] for e in self.extra_providers if e["key"] == provider), None)
+
+    def name_of(self, provider):
+        return {"stashdb": "StashDB", "theporndb": "ThePornDB"}.get(provider) or next(
+            (e["name"] for e in self.extra_providers if e["key"] == provider), provider)
+
+    def provider_of_endpoint(self, endpoint):
+        """Key of the provider with this endpoint, among those that can be asked (StashDB without a key does not count)."""
+        for key in ("stashdb", "theporndb", *[e["key"] for e in self.extra_providers]):
+            if self.client_of(key) is not None and self.endpoint_of(key) == endpoint:
+                return key
+        return None
+
+    def boxes(self):
+        """[(key, client)] of the stash-boxes asked many files per request: StashDB (when set up), then the user-added ones."""
+        rows = [("stashdb", self.stashdb)] if self.stashdb is not None else []
+        return rows + [(e["key"], e["client"]) for e in self.extra_providers]
 
     # ---------- sanity: other renamers, files moved again ----------
 
@@ -360,32 +395,35 @@ class Organizer:
     def _verify(self, candidates):
         """{file_id: (verified, how)} for [(scene, file)]."""
         result = {}
-        stashdb_pairs = []
+        by_box = {}
         for scene, file in candidates:
             ids = {s["endpoint"]: s["stash_id"] for s in scene["stash_ids"]}
-            if self.stash.stashdb_endpoint in ids and self.stashdb is None:
+            box = next((k for k, _ in self.boxes() if self.endpoint_of(k) in ids), None)
+            if box is None and self.stash.stashdb_endpoint in ids:
                 result[file["id"]] = (False, "StashDB is not set up")
-            elif self.stash.stashdb_endpoint in ids:
-                stashdb_pairs.append((scene, file, ids[self.stash.stashdb_endpoint]))
+            elif box is not None:
+                by_box.setdefault(box, []).append((scene, file, ids[self.endpoint_of(box)]))
             elif self.stash.theporndb_endpoint in ids and self.theporndb is not None:
                 result[file["id"]] = self._verify_by_phash(self.theporndb, ids[self.stash.theporndb_endpoint], file)
             else:
                 result[file["id"]] = (False, "no StashDB/ThePornDB id")
-        for i in range(0, len(stashdb_pairs), _FP_BATCH):
-            chunk = stashdb_pairs[i:i + _FP_BATCH]
-            sets = [[{"hash": fp["value"], "algorithm": fp["type"].upper()} for fp in f["fingerprints"]]
-                    for _, f, _ in chunk]
-            try:
-                matches = self.stashdb.find_scenes_by_fingerprints(sets)
-            except Exception:
-                logger.exception("organize: StashDB fingerprint lookup failed")
-                matches = [None] * len(chunk)
-            for (scene, file, stashdb_id), found in zip(chunk, matches):
-                if found and any(m.get("id") == stashdb_id for m in found):
-                    result[file["id"]] = (True, "fingerprint")
-                else:
-                    result[file["id"]] = self._verify_by_phash(self.stashdb, stashdb_id, file,
-                                                               other=[m.get("title") for m in found or []])
+        for box, pairs in by_box.items():
+            client = self.client_of(box)
+            for i in range(0, len(pairs), _FP_BATCH):
+                chunk = pairs[i:i + _FP_BATCH]
+                sets = [[{"hash": fp["value"], "algorithm": fp["type"].upper()} for fp in f["fingerprints"]]
+                        for _, f, _ in chunk]
+                try:
+                    matches = client.find_scenes_by_fingerprints(sets)
+                except Exception:
+                    logger.exception("organize: %s fingerprint lookup failed", self.name_of(box))
+                    matches = [None] * len(chunk)
+                for (scene, file, provider_id), found in zip(chunk, matches):
+                    if found and any(m.get("id") == provider_id for m in found):
+                        result[file["id"]] = (True, "fingerprint")
+                    else:
+                        result[file["id"]] = self._verify_by_phash(client, provider_id, file,
+                                                                   other=[m.get("title") for m in found or []])
         return result
 
     def _provider_metadata(self, scene):
@@ -394,6 +432,7 @@ class Organizer:
         site names are not the spelling the library uses."""
         ids = {s["endpoint"]: s["stash_id"] for s in scene["stash_ids"]}
         for endpoint, client in ((self.stash.stashdb_endpoint, self.stashdb),
+                                 *[(e["endpoint"], e["client"]) for e in self.extra_providers],
                                  (self.stash.theporndb_endpoint, self.theporndb)):
             if endpoint in ids and client is not None:
                 try:

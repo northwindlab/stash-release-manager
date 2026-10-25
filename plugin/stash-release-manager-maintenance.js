@@ -2080,7 +2080,7 @@
       renderItems: (page) => el('ul', { className: 'srw-release-list' }, page.map((x) => {
         const rowStatus = el('span', { className: 'srw-key-status' });
         const r = results[x.id];
-        const sdbLink = (m) => el('a', { href: `https://stashdb.org/scenes/${m.id}`, target: '_blank', rel: 'noopener noreferrer', textContent: `${m.title || m.id} ↗` });
+        const sdbLink = (m) => el('a', { href: window.SRW.sceneUrl(m.provider || 'stashdb', m.id), target: '_blank', rel: 'noopener noreferrer', textContent: `${m.title || m.id} ↗` });
         const remove = () => { items = items.filter((i) => i.id !== x.id); view.reload(); updateSummary(); };
         const review = window.SRW.iconButton('button', ['faFingerprint', 'faMagnifyingGlass'], 'Send to Identify Scene', {
           title: 'Adds the tag “Review: Identify Scene” (nothing else changes); the tools to identify it are there',
@@ -2099,7 +2099,7 @@
             r.held_by ? el('span', { className: 'srw-hint', textContent: ` scene ${r.held_by} has it` }) : null]) : null,
           window.SRW.buildStashLink('scene', x.id, 'Play in Stash'),
           r && r.state === 'unique' ? el('button', { className: 'srw-btn srw-btn-sm srw-btn-primary', textContent: 'Assign',
-            onClick: (e) => confirmInline(e.currentTarget, `Put the ${r.matches[0].provider === 'theporndb' ? 'ThePornDB' : 'StashDB'} scene “${r.matches[0].title}” on this file? Title, date, studio, performers and tags are filled in; the old state is saved to the backup file.`, async () => {
+            onClick: (e) => confirmInline(e.currentTarget, `Put the ${window.SRW.providerLabel(r.matches[0].provider || 'stashdb')} scene “${r.matches[0].title}” on this file? Title, date, studio, performers and tags are filled in; the old state is saved to the backup file.`, async () => {
               const res = (await window.SRW.runOp('compare_unidentified_apply', { scene_ids: [x.id] })).results || {};
               const one = res[x.id] || {};
               if (one.error) { rowStatus.textContent = ` error: ${one.error}`; return; }
@@ -3765,10 +3765,10 @@
       const q = el('input', { type: 'text', value: stem, style: 'width: 18rem', title: 'Search text (pre-filled from the file name)' });
 
       const renderCandidates = (items, fingerprint) => {
-        if (!items.length) { out.replaceChildren(el('div', { className: 'srw-hint', textContent: fingerprint ? 'No fingerprint match at StashDB or ThePornDB.' : 'No results.' })); return; }
+        if (!items.length) { out.replaceChildren(el('div', { className: 'srw-hint', textContent: fingerprint ? 'No fingerprint match at any provider you set up.' : 'No results.' })); return; }
         out.replaceChildren(el('div', { className: 'srw-hint', textContent: fingerprint ? (items.some((c) => c.provider === 'theporndb')
           ? 'Fingerprint match at ThePornDB (its hash lookup is similarity-based, NOT guaranteed exact -- compare by playing before using it):'
-          : 'Exact fingerprint match at StashDB:') : 'Name search results (not verified -- compare by playing):' }),
+          : `Exact fingerprint match at ${window.SRW.providerLabel(items[0].provider || 'stashdb')}:`) : 'Name search results (not verified -- compare by playing):' }),
           ...items.map((c) => {
             const useBtn = el('button', { className: 'srw-btn srw-btn-sm srw-btn-primary', textContent: `Use this for ${tag}` });
             if (c.held_by_scene) { useBtn.disabled = true; useBtn.textContent = `held by scene #${c.held_by_scene}`; }

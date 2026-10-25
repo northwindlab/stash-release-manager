@@ -182,18 +182,23 @@ class SceneCompare:
 
     # ---------- reading ----------
 
-    @staticmethod
-    def _provider_key(stash, endpoint):
+    def _provider_key(self, stash, endpoint):
         if endpoint == stash.stashdb_endpoint:
             return "stashdb"
         if endpoint == stash.theporndb_endpoint:
             return "theporndb"
-        return None
+        imp = self.get_importer() if self.get_importer else None  # a user-added stash-box (v0.244.0)
+        return next((e["key"] for e in getattr(imp, "extra_providers", [])
+                     if e["endpoint"] == endpoint), None)
 
-    @staticmethod
-    def _provider_url(provider, pid):
-        return {"stashdb": f"https://stashdb.org/scenes/{pid}",
-                "theporndb": f"https://theporndb.net/scenes/{pid}"}.get(provider)
+    def _provider_url(self, provider, pid):
+        known = {"stashdb": f"https://stashdb.org/scenes/{pid}", "theporndb": f"https://theporndb.net/scenes/{pid}"}
+        if provider in known:
+            return known[provider]
+        imp = self.get_importer() if self.get_importer else None
+        e = next((x for x in getattr(imp, "extra_providers", []) if x["key"] == provider), None)
+        base = (e["endpoint"] if e else "").rsplit("/graphql", 1)[0].rstrip("/")  # stash-box web UI: <host>/scenes/<id>
+        return f"{base}/scenes/{pid}" if base else None
 
     def _provider_scene(self, provider, pid):
         key = (provider, pid)
@@ -305,7 +310,7 @@ class SceneCompare:
                 "performers": d.get("performers") or [], "error": d.get("error")}
 
     def identify(self, pair_id, scene_id):
-        """Exact fingerprint lookup (StashDB first, then ThePornDB) for one scene of the pair."""
+        """Exact fingerprint lookup (StashDB first, then the user-added stash-boxes, then ThePornDB) for one scene of the pair."""
         err = self._check_member(pair_id, scene_id)
         if err:
             return {"error": err}
@@ -317,15 +322,14 @@ class SceneCompare:
         found = imp._identify([{"files": [sc["files"][0]]}]).get(sc["files"][0]["id"]) or {"provider": None, "matches": []}
         held = {}
         for m in found["matches"]:
-            other = self.get_stash().find_scene_by_stashdb_id(
-                m["id"], self.get_stash().stashdb_endpoint if found["provider"] == "stashdb" else self.get_stash().theporndb_endpoint)
+            other = self.get_stash().find_scene_by_stashdb_id(m["id"], imp.endpoint_of(found["provider"]))
             held[m["id"]] = other["id"] if other and str(other["id"]) != str(scene_id) else None
         return {"provider": found["provider"],
                 "matches": [dict(self._describe(found["provider"], m["id"], m.get("title")), held_by_scene=held.get(m["id"]))
                             for m in found["matches"]]}
 
     def search(self, pair_id, scene_id, query):
-        """Free-text search at StashDB and ThePornDB (same call the import name suggestions use)."""
+        """Free-text search at every provider that is set up (same call the import name suggestions use)."""
         err = self._check_member(pair_id, scene_id)
         if err:
             return {"error": err}
@@ -334,7 +338,8 @@ class SceneCompare:
             return {"error": "enter at least 3 characters"}
         imp = self.get_importer()
         out = []
-        for prov, client in (("stashdb", imp.stashdb), ("theporndb", imp.theporndb)):
+        for prov, client in (("stashdb", imp.stashdb), *[(e["key"], e["client"]) for e in imp.extra_providers],
+                             ("theporndb", imp.theporndb)):
             if client is None:
                 continue
             try:
@@ -355,7 +360,7 @@ class SceneCompare:
         if err:
             return {"error": err}
         stash = self.get_stash()
-        endpoint = {"stashdb": stash.stashdb_endpoint, "theporndb": stash.theporndb_endpoint}.get(provider)
+        endpoint = self.get_importer().endpoint_of(provider)
         if not endpoint:
             return {"error": "unknown provider"}
         full = self.scene(scene_id, with_provider=False)
@@ -514,7 +519,7 @@ class SceneCompare:
         for sc in usable:
             hit = found.get(sc["files"][0]["id"]) or {"provider": "stashdb", "matches": []}
             prov, m = hit["provider"], hit["matches"] or []
-            endpoint = stash.stashdb_endpoint if prov == "stashdb" else stash.theporndb_endpoint
+            endpoint = imp.endpoint_of(prov)
             entry = {"state": "none", "matches": [{"id": x["id"], "title": x.get("title"), "provider": prov} for x in m]}
             if len(m) > 1:
                 entry["state"] = "ambiguous"
@@ -546,7 +551,7 @@ class SceneCompare:
                 continue
             pid = e["matches"][0]["id"]
             prov = e["matches"][0].get("provider") or "stashdb"
-            endpoint = stash.stashdb_endpoint if prov == "stashdb" else stash.theporndb_endpoint
+            endpoint = self.get_importer().endpoint_of(prov)
             try:
                 full = self.scene(sid, with_provider=False)
                 if full.get("stash_ids"):
@@ -555,7 +560,7 @@ class SceneCompare:
                 backup = self._backup(0, "before-fingerprint-assign", full, {"adopt": {"provider": prov, "provider_id": pid}})
                 library_check.apply_fix(stash, sid, pid, create_missing_performers=True, endpoint=endpoint, keep_other_endpoints=True)
                 after = self.scene(sid, with_provider=False)
-                history.add("info", "history", "compare", f"Scene identified by exact {'StashDB' if prov == 'stashdb' else 'ThePornDB'} fingerprint: {pid[:8]}",
+                history.add("info", "history", "compare", f"Scene identified by exact {self.get_importer().name_of(prov)} fingerprint: {pid[:8]}",
                             scene_id=sid, scene_title=after["title"], details={"provider_id": pid, "backup": backup})
                 with _FP_LOCK:
                     fp_delete(self.db, sid)

@@ -694,6 +694,12 @@ def _stashdb_or_none():
     return client if (client.session.headers.get("ApiKey") or "").strip() else None
 
 
+def _extra_stashboxes():
+    """The enabled user-added stash-boxes as the library tools take them (v0.244.0): [{"key", "name", "endpoint", "client"}]."""
+    return [{"key": p["key"], "name": p["name"], "endpoint": p["url"], "client": StashDBClient(p["api_key"], url=p["url"])}
+            for p in metadata_provider_repo.list_all(db, enabled_only=True)]
+
+
 def _organizer():
     """Maintenance > Organize library (2026-09-28, library_organize.py)."""
     def setting(key):
@@ -704,7 +710,8 @@ def _organizer():
     except Exception:
         theporndb_client = None
     return library_organize.Organizer(db, get_stash_client(), _stashdb_or_none(), theporndb_client,
-                                      _stash_path_to_local, setting, get_whisparr_client=get_whisparr_client)
+                                      _stash_path_to_local, setting, get_whisparr_client=get_whisparr_client,
+                                      extra_providers=_extra_stashboxes())
 def _importer():
     """Maintenance > Import folder (2026-09-29, library_import.py)."""
     def setting(key):
@@ -716,7 +723,7 @@ def _importer():
         theporndb_client = None
     importer = library_import.Importer(db, get_stash_client(), _stashdb_or_none(), theporndb_client,
                                        _stash_path_to_local, setting, get_whisparr_client=get_whisparr_client,
-                                       recycle=_recycle_library_file)
+                                       recycle=_recycle_library_file, extra_providers=_extra_stashboxes())
     importer.backup_dir = os.path.join(settings.data_dir, "backups")
     return importer
 

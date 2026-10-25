@@ -6,6 +6,9 @@ Version rules (from 0.199.0 on; before, almost every change raised the MINOR num
 MINOR = a new capability a user can use, or a change that needs the user to act; MAJOR = something that worked breaks. 1.0.0 comes when the
 install guide has been proven on other machines. Documentation only gets no version.
 
+## 0.244.0
+- **The library tools use the stash-boxes you added yourself.** Import folder, Unidentified scenes, Compare scenes (identify, search, use), Organize library (the fingerprint check before a rename or move) and the "Organized" hook used to know StashDB and ThePornDB only. They now ask StashDB (when set up), then your own stash-boxes (one batch request per 40 files, only for files the earlier ones do not know), then ThePornDB (exact hashes). A match keeps its provider: "Assign" / "Use this" puts the id on that stash-box's endpoint, the confirmation names it, and the link opens its scene page. A scene that carries only an id of your stash-box is recognised and checked against it. Needs the container rebuild.
+
 ## 0.243.21 (with 0.243.19 - 0.243.20)
 - **Performers without scenes: several at once.** Every card has a checkbox; "select this page" sits in the toolbar and "Select all N matching" in the bulk bar (the search text and the "hide the ones on the watchlist" switch count). The bar offers "Remove from watchlist (n)" (only the selected ones that are on it; they stay in Stash), "Delete (n)" (red, asks first, cannot be undone) and "Clear selection". The actions run one performer after the other with a counter; one that cannot be deleted stays selected and is counted.
 - **The page stays where it is** after you remove or change ONE entry of a long list (it used to jump back to page 1): Performers without scenes, Unidentified scenes, duration findings, Compare groups and Movies & groups > Already in the library. Filter and sort changes still start at page 1.
