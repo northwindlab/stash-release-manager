@@ -249,6 +249,11 @@ def download_progress():
         result.setdefault(release["scene_stashdb_id"], {"phase": "verifying"})
     # Import phases of releases the queries above don't cover.
     for scene_id, entry in live.items():
+        if entry.get("phase") == "waiting_import" and scene_id not in result:
+            # The download-finished note of a release that has no download job any more (sent back to searching meanwhile): nothing will
+            # ever import it, so drop the note instead of counting it as running (v0.246.11).
+            import_progress.clear(entry.get("provider"), scene_id)
+            continue
         result.setdefault(scene_id, _import_phase(entry, scene_id))
     _overlay_torrent_health(result, queues_by_client)
     return result

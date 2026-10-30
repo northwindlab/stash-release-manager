@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         StashReleaseManager for stash-box sites
 // @namespace    stash-release-manager
-// @version      0.240.20
+// @version      0.246.12
 // @description  On scene pages and scene cards: Send to wishlist, Send and search, Open in Stash, Copy Stash-ID, plus a status colour. On performer and studio pages: Watch / Unwatch.
 // @match        https://stashdb.org/*
 // @grant        GM_xmlhttpRequest
@@ -108,14 +108,34 @@
     return b;
   }
 
+  // A short pop-up in the corner (like Stasharr's): the hand-off worked or failed. Errors stay a little longer.
+  function toast(text, ok) {
+    let box = document.querySelector('.srm-toasts');
+    if (!box) {
+      box = document.createElement('div');
+      box.className = 'srm-toasts';
+      document.body.appendChild(box);
+    }
+    const t = document.createElement('div');
+    t.className = 'srm-toast ' + (ok ? 'srm-toast-ok' : 'srm-toast-err');
+    t.textContent = text;
+    box.appendChild(t);
+    setTimeout(() => t.remove(), ok ? 4000 : 8000);
+  }
+
   async function send(id, search, btn) {
     btn.disabled = true;
     try {
       const r = await call('POST', '/userscript/wishlist?search=' + (search ? 'true' : 'false'), { origin: location.origin, id });
       btn.title = r && r.already_in_library ? 'Stash already has this scene' : 'Done';
+      btn.classList.remove('srm-failed');
+      if (r && r.already_in_library) toast('Stash already has this scene.', true);
+      else if (r && r.already_sent) toast('Already on the wishlist.', true);
+      else toast(search ? 'Sent to StashReleaseManager: added to the wishlist, searching now.' : 'Sent to StashReleaseManager: added to the wishlist.', true);
     } catch (e) {
       btn.title = 'Failed: ' + e.message;
       btn.classList.add('srm-failed');
+      toast('Could not send the scene: ' + e.message, false);
     }
     btn.disabled = false;
     await refresh([id]);
@@ -224,8 +244,11 @@
       b.disabled = true;
       try {
         await call('POST', '/userscript/watch', { origin: location.origin, kind, id, name: entityName(h3), watched: !e.watched });
+        const name = entityName(h3) || kind;
+        toast(e.watched ? 'Removed from the watchlist: ' + name : 'Added to the watchlist: ' + name, true);
       } catch (err) {
         state.entities[key] = Object.assign({}, e, { error: err.message });
+        toast('Could not change the watchlist: ' + err.message, false);
       }
       b.disabled = false;
       await refreshEntity(kind, id);
@@ -335,6 +358,9 @@
     .srm-btn.srm-failed { color: #ff6b6b; }
     .srm-btn.srm-done { color: #5fd38d; }
     .srm-page .srm-btn { color: inherit; }
+    .srm-toasts { position: fixed; right: 16px; bottom: 16px; z-index: 2147483647; display: flex; flex-direction: column; gap: 8px; align-items: flex-end; pointer-events: none; }
+    .srm-toast { max-width: 360px; padding: 10px 14px; border-radius: 6px; font: 14px/1.35 sans-serif; color: #fff; background: #2b2f36; border-left: 5px solid #5cc98a; box-shadow: 0 4px 14px rgba(0,0,0,.5); }
+    .srm-toast.srm-toast-err { border-left-color: #e05c5c; }
   `;
   document.head.appendChild(css);
 

@@ -6,6 +6,10 @@ Version rules (from 0.199.0 on; before, almost every change raised the MINOR num
 MINOR = a new capability a user can use, or a change that needs the user to act; MAJOR = something that worked breaks. 1.0.0 comes when the
 install guide has been proven on other machines. Documentation only gets no version.
 
+## 0.246.12 (with 0.246.11)
+- **Userscript: feedback pop-up.** A short pop-up in the bottom right corner tells you whether the hand-off to the sidecar worked ("added to the wishlist", "searching now", "already on the wishlist", "Stash already has this scene", "added to / removed from the watchlist") or failed (in red, with the reason, and it stays longer). Update the script in your userscript manager afterwards.
+- **Fix: the number on the Activity tab could be higher than its list.** A "download finished" note of a release that had been sent back to searching was never cleared and counted as a running import until the container restarted. Such notes are now dropped.
+
 ## 0.246.10 (with 0.246.3 - 0.246.9)
 - **Shared fingerprints, refined.** The provider's lookup by picture hash (PHASH) is a **similarity** search with a few bits of tolerance, so it also returns scenes that are other videos with the same frame layout (VR scenes, black intros ...). Only scenes that have an **exactly equal** hash registered (OSHASH, or PHASH at distance 0) now count as owners of a file's fingerprint; the similar-only ones are set aside, listed in a fold-away note per row, and no longer make a file "ambiguous". A real wrong submission at the provider (someone's exact hashes on an unrelated scene) stays listed. A new scan settles the rows that are fine now.
 - **Download verification** leaves a hint in History (and a row on the list) when a verified download's fingerprint is registered at several scenes and the length does not single the scene out; the import is not stopped.

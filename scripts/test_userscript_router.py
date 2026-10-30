@@ -109,5 +109,8 @@ except HTTPException as ex:
 js = open(os.path.join(os.path.dirname(__file__), "..", "api", "userscript", "srm.user.js"), encoding="utf-8").read()
 check("scene painter only takes bars with a scene id", "querySelectorAll('.srm-bar[data-srm-id]')" in js and "try { paintScene(wrap)" in js)
 
+# 0.246.12: the user gets a pop-up when a hand-off worked or failed
+check("send and watch show a pop-up on success and failure", js.count("toast(") >= 6 and ".srm-toast-err" in js)
+
 print("\nALL OK" if not FAILS else "\nFAILED: %s" % FAILS)
 sys.exit(1 if FAILS else 0)
