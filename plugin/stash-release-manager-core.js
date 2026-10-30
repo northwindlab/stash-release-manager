@@ -11,7 +11,7 @@
   // rule and the bug it caused when this drifted). Change this if you
   // install under a different folder name.
   // Must equal `version:` in stash-release-manager.yml (scripts/test_plugin_version.py checks it).
-  const PLUGIN_VERSION = '0.246.12';
+  const PLUGIN_VERSION = '0.246.16';
   const PLUGIN_ID = 'stash-release-manager';
   const PLUGIN_NAME = 'StashReleaseManager';
 
@@ -2273,6 +2273,11 @@
         const left = p.seconds_left != null ? `, ${formatSeconds(p.seconds_left)} left` : '';
         const speed = p.speed_x ? `, ${p.speed_x}x` : '';
         const how = p.method ? ` (${p.method})` : '';
+        // The check of the finished file (v0.246.15): ffmpeg reads it through once; minutes on a NAS, so it shows how far it is and how long it runs.
+        if (p.checking) {
+          const running = p.started_at ? `, running ${formatWaited(p.started_at)}` : '';
+          return { pct: p.percentage || 0, text: `Checking the re-encoded file${how.replace(/: checking the result/, '')} — ${p.percentage || 0}%${left}${running}` };
+        }
         return { pct: p.percentage || 0, text: `Re-encoding to 1080p${how} — ${p.percentage || 0}%${speed}${left}` };
       }
       case 'copying': {

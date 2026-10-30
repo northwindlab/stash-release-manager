@@ -289,7 +289,7 @@ def _overlay_torrent_health(result, queues_by_client=None):
 def _import_phase(entry, scene_id=None):
     """import_progress entry -> the progress shape the plugin renders."""
     out = {"phase": entry["phase"]}
-    for key in ("method", "can_local", "percentage", "bytes_done", "bytes_total", "speed_bps", "speed_x", "seconds_left"):
+    for key in ("method", "can_local", "percentage", "bytes_done", "bytes_total", "speed_bps", "speed_x", "seconds_left", "checking", "started_at"):
         if entry.get(key) is not None:
             out[key] = entry[key]
     if entry["phase"] == "waiting_encode":
@@ -632,7 +632,9 @@ def reject_review_candidate(provider: str, scene_stashdb_id: str):
     candidate = release_repo.get_review_candidate_for_scene(_db, provider, scene_stashdb_id)
     if candidate is None:
         raise HTTPException(404, f"No review candidate stored for scene {scene_stashdb_id}")
-    release_repo.add_review_rejected_title(_db, provider, scene_stashdb_id, candidate["title"])
+    # exact (v0.246.13): "not this one" is a verdict on THIS file (often only its quality), not on the whole release -- its other encodes
+    # (720p / 1080p / x265 ...) stay candidates. Found live: rejecting a 480p blocked every 1080p / 2160p of the same release.
+    release_repo.add_review_rejected_title(_db, provider, scene_stashdb_id, candidate["title"], exact=True)
     release_repo.set_search_result_for_scene(_db, provider, scene_stashdb_id, RESULT_TITLE_MISMATCH_ONLY)
     history.scene("warning", "blocklist", f"Possible match rejected (blocklisted): {candidate['title']}",
                   provider, scene_stashdb_id)
@@ -651,6 +653,7 @@ def restore_review_candidate(provider: str, scene_stashdb_id: str):
     if candidate is None:
         raise HTTPException(404, "Nothing to undo for this scene (the rejection is too old, or the sidecar was restarted since)")
     release_repo.remove_review_rejected_title(_db, provider, scene_stashdb_id, candidate["title"])
+    release_repo.remove_review_rejected_title(_db, provider, scene_stashdb_id, indexer_search.EXACT_PREFIX + candidate["title"])  # since 0.246.13
     release_repo.set_review_candidate_for_scene(_db, provider, scene_stashdb_id, candidate)
     release_repo.set_search_result_for_scene(_db, provider, scene_stashdb_id, indexer_search.RESULT_NEEDS_REVIEW)
     history.scene("info", "blocklist", f"Rejection undone, the possible match is back for review: {candidate['title']}", provider, scene_stashdb_id)

@@ -146,9 +146,14 @@ def build_command(src, dst, info, quality, use_hw, codec="h265", preset="fast"):
     return cmd
 
 
-def decode_problem(path, timeout_hours=2):
+def decode_problem(path, timeout_hours=2, progress=None, duration=None):
     """None when ffmpeg decodes the whole video (and the first audio track) without an error, else the first error line. A hardware encoder can
-    report success and still write a broken stream (found 2026-10-17: a VAAPI encode on a GPU that hangs, "CABAC_MAX_BIN" in every other frame)."""
+    report success and still write a broken stream (found 2026-10-17: a VAAPI encode on a GPU that hangs, "CABAC_MAX_BIN" in every other frame).
+    `progress(pct, speed_x, seconds_left)` (v0.246.15, with the file's `duration`): the check of a long file takes minutes on a NAS, the Activity row shows how far it is."""
+    if progress and duration:
+        cmd = ["ffmpeg", "-v", "error", "-xerror", "-nostdin", "-progress", "pipe:1", "-nostats", "-i", path, "-map", "0:v:0", "-map", "0:a:0?", "-f", "null", "-"]
+        res = _run(cmd, {"duration": duration}, progress, timeout_hours)
+        return None if res is None else (f"decoding the encoded file did not finish in time" if str(res).startswith("stopped after") else res)
     try:
         res = subprocess.run(["ffmpeg", "-v", "error", "-xerror", "-i", path, "-map", "0:v:0", "-map", "0:a:0?", "-f", "null", "-"],
                              capture_output=True, text=True, timeout=timeout_hours * 3600)
@@ -159,7 +164,7 @@ def decode_problem(path, timeout_hours=2):
     return None if res.returncode == 0 and not res.stderr.strip() else _error_tail(res.stderr)
 
 
-def verify_output(dst, source_info):
+def verify_output(dst, source_info, progress=None):
     """None when the encoded file looks right (1080p class, the same length, decodes without errors), else the reason."""
     out = probe(dst)
     if not out:
@@ -168,7 +173,7 @@ def verify_output(dst, source_info):
         return f"the encoded file is still {out['width']}x{out['height']}"
     if source_info["duration"] and abs(out["duration"] - source_info["duration"]) > max(2.0, source_info["duration"] * 0.01):
         return f"the encoded file is {out['duration']:.0f} s long, the original {source_info['duration']:.0f} s"
-    bad = decode_problem(dst)
+    bad = decode_problem(dst, progress=progress, duration=out["duration"])
     return f"the encoded video is damaged ({bad})" if bad else None
 
 

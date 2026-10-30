@@ -1390,10 +1390,25 @@ def run_file_import():
 _indexer_search_lock = threading.Lock()
 
 
+STUCK_GRACE_DAYS = 1  # a scene dated today or yesterday is not "stuck" yet (v0.246.16); the plugin's Stuck tab uses the same rule
+
+
+def too_new_to_be_stuck(scene_date, today=None):
+    """True for a scene released today or yesterday: indexers post a release hours (sometimes a day) after its date, so "nothing found" is still
+    normal. Compared by the scene's date, not by when it reached the wishlist (an old scene added today is stuck at once)."""
+    from datetime import date, timedelta
+    try:
+        released = date.fromisoformat(str(scene_date or "")[:10])
+    except ValueError:
+        return False
+    return released >= (today or datetime.now(timezone.utc).date()) - timedelta(days=STUCK_GRACE_DAYS)
+
+
 def stuck_releases(pending):
     """Releases the 'Search all stuck now' button looks at: on the wishlist, searched before (a result is recorded), nothing grabbed. A scene that was
-    found to be a duplicate of one we already have is left out -- there is nothing to find."""
-    return [r for r in pending if r.get("last_search_result") and r["last_search_result"] != "duplicate_download"]
+    found to be a duplicate of one we already have is left out -- there is nothing to find. Scenes of today / yesterday are not stuck yet."""
+    return [r for r in pending if r.get("last_search_result") and r["last_search_result"] != "duplicate_download"
+            and not too_new_to_be_stuck(r.get("scene_date"))]
 
 
 IMMEDIATE_TARGETED_PER_TICK = 10  # RSS mode: targeted searches for scenes older than the feed window, per run (the rest follows in the next run)

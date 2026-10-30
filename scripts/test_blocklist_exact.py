@@ -43,5 +43,10 @@ check("stored as 'exact:<title>' next to the plain one, on every row of the scen
 release_repo.add_review_rejected_title(DB, "stashdb", "s1", SMALL, exact=True)
 check("no duplicate when added twice", len(release_repo.get_review_rejected_titles(DB, "stashdb", "s1")) == 2)
 
+# v0.246.13: "Not this one" on a review candidate (the 480p of a release) blocks only that file, the 1080p of the same release stays a candidate
+src = open(os.path.join(os.path.dirname(__file__), "..", "api", "routers", "releases.py"), encoding="utf-8").read()
+check("reject of a review candidate stores an exact entry", 'candidate["title"], exact=True)' in src)
+check("the undo also removes the exact entry", "indexer_search.EXACT_PREFIX + candidate" in src)
+
 print("\nALL OK" if not FAILS else f"\n{len(FAILS)} FAILED: {FAILS}")
 sys.exit(1 if FAILS else 0)

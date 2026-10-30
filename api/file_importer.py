@@ -729,7 +729,7 @@ def finish_remote_encode(provider, stash_id, worker, ok, error=None, seconds=Non
             _encode_finished(provider, stash_id)
         return {"ok": True, "recorded": "failed"}
     encode_queue.start_verify(provider, stash_id, worker)
-    import_progress.set_phase(provider, stash_id, "encoding", percentage=100, method=f"{worker}: checking the result")
+    import_progress.set_phase(provider, stash_id, "encoding", percentage=0, method=f"{worker}: checking the result", checking=True, started_at=int(time.time()))
     threading.Thread(target=_verify_remote_result, args=(provider, stash_id, worker, seconds, hw, codec), daemon=True,
                      name=f"verify-encode-{stash_id[:8]}").start()
     return {"ok": True, "recorded": "verifying"}
@@ -742,7 +742,11 @@ def _verify_remote_result(provider, stash_id, worker, seconds, hw, codec):
     db, source_file, info = job["db"], job["source"], job["info"]
     dst = remote_output_path(source_file, stash_id, info)
     try:
-        problem = transcode.verify_output(dst, info)
+        started = int(time.time())
+        problem = transcode.verify_output(
+            dst, info, progress=lambda pct, speed, left: import_progress.set_phase(
+                provider, stash_id, "encoding", percentage=pct, speed_x=speed, seconds_left=left,
+                method=f"{worker}: checking the result", checking=True, started_at=started))
         if problem:
             transcode._remove(dst)
             _encode_failed(db, provider, stash_id, f"{worker}: {problem}")

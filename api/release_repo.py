@@ -666,11 +666,17 @@ def set_search_result_for_scene(db, provider, scene_stashdb_id, result):
     one of indexer_search.py's `_RESULT_*` constants (e.g.
     'no_candidates', 'title_mismatch_only', 'grabbed')."""
     with db.connect() as conn:
+        before = conn.execute("SELECT last_search_result FROM release WHERE provider = ? AND scene_stashdb_id = ? LIMIT 1",
+                              (provider, scene_stashdb_id)).fetchone()
         conn.execute(
             """UPDATE release SET last_search_at = datetime('now'), last_search_result = ?
                WHERE provider = ? AND scene_stashdb_id = ?""",
             (result, provider, scene_stashdb_id),
         )
+    # Live push (v0.246.14): the Activity tabs (Stuck / Needs review) moved only after a reload, because a changed search result sent no event.
+    # Only a CHANGED result is announced: a scan that finds the same "nothing usable" again must not make every open page reload.
+    if before is not None and before["last_search_result"] != result:
+        _changed(provider, scene_stashdb_id, "search_result")
 
 
 def mark_targeted_search(db, provider, scene_stashdb_id):
@@ -745,12 +751,17 @@ def set_review_candidate_for_scene(db, provider, scene_stashdb_id, candidate):
     above. Cleared (not left stale) whenever a real grab succeeds or a
     later search no longer finds this same review-worthy candidate --
     see indexer_search.py's search_and_grab()."""
+    new = json.dumps(candidate) if candidate else None
     with db.connect() as conn:
+        before = conn.execute("SELECT review_candidate FROM release WHERE provider = ? AND scene_stashdb_id = ? LIMIT 1",
+                              (provider, scene_stashdb_id)).fetchone()
         conn.execute(
             """UPDATE release SET review_candidate = ?
                WHERE provider = ? AND scene_stashdb_id = ?""",
-            (json.dumps(candidate) if candidate else None, provider, scene_stashdb_id),
+            (new, provider, scene_stashdb_id),
         )
+    if before is not None and before["review_candidate"] != new:
+        _changed(provider, scene_stashdb_id, "review_candidate")  # v0.246.14: the Needs review tab shows it without a reload
 
 
 def get_review_candidate_for_scene(db, provider, scene_stashdb_id):

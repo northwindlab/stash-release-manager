@@ -130,7 +130,13 @@
     // covered it): searched at least once, nothing usable found, so it
     // won't progress on its own without either a config change or a
     // new indexer result appearing.
-    const stuck = sentGrouped.filter((r) => !r.download_job_id && r.last_search_result);
+    // A scene dated today or yesterday is not "stuck" yet (v0.246.16): indexers post a release hours, sometimes a day, after its date. Same rule as the
+    // sidecar's "Search all stuck" (main.py too_new_to_be_stuck); it stays on the Releases page's wishlist and is searched as usual.
+    const day = (offset) => new Date(Date.now() - offset * 86400000).toISOString().slice(0, 10);
+    const tooNew = (r) => !!r.scene_date && String(r.scene_date).slice(0, 10) >= day(1);
+    const searchedNoJob = sentGrouped.filter((r) => !r.download_job_id && r.last_search_result);
+    const stuck = searchedNoJob.filter((r) => !tooNew(r));
+    const stuckTooNew = searchedNoJob.length - stuck.length;
     // "Source file missing" (2026-09-23, see file_importer.py's own
     // 'source_missing' failure path / project_roadmap_todo.md memory's
     // "Import-failed reason + conditional Retry" entry) -- deliberately
@@ -152,11 +158,17 @@
     // Built side by side (each one asks the sidecar for its own bits), the downloads first in the list.
     const stuckSection = (async () => {
       const [scenesPreview, moviesPreview, torrents] = await stuckExtras;
-      return withTorrentProblems(withStuckToolbar(await buildSection('Stuck (searched, nothing usable found)', stuck, {
+      const stuckGroup = withTorrentProblems(withStuckToolbar(await buildSection('Stuck (searched, nothing usable found)', stuck, {
         emptyText: 'Nothing stuck right now.',
         showSearchStatus: true, showSearchActions: true, showImportError: true, sortBy: 'last_search_at', onChanged: () => render(container),
         movieRows: movieRows(filmsStuck, progressElements, container),
       }), scenesPreview, moviesPreview), container, torrents);
+      if (stuckTooNew) {
+        const note = window.SRW.el('p', { className: 'srw-hint', textContent: `${stuckTooNew} scene${stuckTooNew === 1 ? '' : 's'} dated today or yesterday ${stuckTooNew === 1 ? 'is' : 'are'} not listed here yet: indexers often post a release hours after its date. ${stuckTooNew === 1 ? 'It is' : 'They are'} searched as usual and stay on the Releases page's wishlist.` });
+        const summary = stuckGroup.querySelector(':scope > summary');
+        if (summary) summary.after(note); else stuckGroup.prepend(note);
+      }
+      return stuckGroup;
     })();
     const sectionPromises = [
       ['review', 'Needs review', buildNeedsReview(reviews, container, filmsReview)],
