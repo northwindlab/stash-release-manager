@@ -157,6 +157,44 @@ def unidentified(refresh: bool = False):
     return _compare().unidentified_list(refresh=refresh)
 
 
+def _slow_reset():
+    import routers.maintenance as maintenance_router
+    maintenance_router._slow_counts["at"] = 0.0  # the menu badge follows the change at once
+
+
+@router.get("/unorganized")
+def unorganized(refresh: bool = False):
+    """Scenes with a provider id that are not Organized (v0.248.0): kept in the database until "Reload", a change here or an Assign takes/puts a row."""
+    data, at = kept_lists.get(_db, scene_compare.UNORGANIZED_LIST, lambda: _compare().unorganized_list()["scenes"], refresh)
+    if refresh:
+        _slow_reset()
+    return {"scenes": data, "listed_at": at}
+
+
+@router.post("/unorganized/preview")
+def unorganized_preview(body: dict):
+    """What marking scenes Organized would do to their files (up to 50 per call): old -> new path, or why nothing moves. Writes nothing."""
+    imp = _compare().get_importer()
+    out = {}
+    for sid in [str(x) for x in (body.get("scene_ids") or [])][:50]:
+        try:
+            out[sid] = imp.organized_plan(sid)
+        except Exception as e:  # noqa: BLE001
+            out[sid] = {"error": str(e)}
+    return {"results": out}
+
+
+@router.post("/unorganized/organize")
+def unorganized_organize(body: dict):
+    """Marks up to 50 scenes Organized (the organized hook of Stash then acts as for a click there); they leave the kept list."""
+    results = _compare().organized_set([str(x) for x in (body.get("scene_ids") or [])])
+    done = {sid for sid, r in results.items() if r.get("ok")}
+    if done:
+        kept_lists.update(_db, scene_compare.UNORGANIZED_LIST, lambda rows: [r for r in rows if r["id"] not in done])
+        _slow_reset()
+    return {"results": results}
+
+
 @router.post("/unidentified/check")
 def unidentified_check(body: dict):
     """Dry run: StashDB fingerprint lookup for up to 200 scenes, nothing is written."""
@@ -166,7 +204,9 @@ def unidentified_check(body: dict):
 @router.post("/unidentified/apply")
 def unidentified_apply(body: dict):
     """Assigns the StashDB scene to the scenes that were a clear match in the last check (up to 50 per call)."""
-    return {"results": _compare().unidentified_apply([str(x) for x in (body.get("scene_ids") or [])])}
+    results = _compare().unidentified_apply([str(x) for x in (body.get("scene_ids") or [])])
+    _slow_reset()
+    return {"results": results}
 
 
 @router.post("/review/{scene_id}/add")

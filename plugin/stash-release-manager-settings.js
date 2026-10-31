@@ -2643,6 +2643,33 @@
   }
 
   // One labeled setting row in the usual shape (label + input/select + Save + status), wired to a single settings_set key (v0.146.0).
+  // Which result categories the searches may use (v0.247.0, category_filter.py): a ticked box = searched, unticked = dropped from every result list.
+  // The ids are NZBFinder's sub categories of XXX (6000).
+  const SEARCH_CATEGORIES = [[6010, 'DVD'], [6030, 'SD'], [6040, 'HD'], [6045, 'UHD'], [6046, 'VR'], [6047, 'Creator'], [6048, 'JAV'],
+    [6050, 'Pack'], [6060, 'Imageset'], [6999, 'Other']];
+  function appendCategoryRows(section, settings) {
+    const { el } = window.SRW;
+    const off = new Set(String(settings.excluded_categories != null ? settings.excluded_categories : '6050,6060')
+      .split(',').map((s) => parseInt(s, 10)).filter(Boolean));
+    const status = el('span', { className: 'srw-key-status' });
+    const boxes = SEARCH_CATEGORIES.map(([id, name]) => {
+      const box = el('input', { type: 'checkbox' });
+      box.checked = !off.has(id);
+      box.dataset.id = String(id);
+      box.addEventListener('change', async () => {
+        const excluded = boxes.filter((b) => !b.checked).map((b) => b.dataset.id).join(',');
+        const result = await window.SRW.runOp('settings_set', { key: 'excluded_categories', value: excluded });
+        status.textContent = result && result.error ? ` error: ${result.error}` : ' saved';
+      });
+      return box;
+    });
+    section.appendChild(el('p', { className: 'srw-hint', textContent: 'Result categories to search (applies to every search, the RSS pull and manual search): an unticked category is dropped from the results. '
+      + 'A pack of many scenes or a set of pictures is never the one scene wanted, so Pack and Imageset are off by default; JAV and Creator stay on for the stash-boxes that have them.' }));
+    section.appendChild(el('div', { className: 'srw-category-row' }, SEARCH_CATEGORIES.map(([id, name], i) =>
+      el('label', { style: 'margin-right:14px;white-space:nowrap' }, [boxes[i], ` ${name} (${id})`]))));
+    section.appendChild(status);
+  }
+
   function appendSettingRow(section, { label, key, value, hint, min, max, step, options }) {
     const { el } = window.SRW;
     const control = options
@@ -2783,9 +2810,10 @@
       hint: 'RSS keeps the number of indexer requests low: one blank-query feed pull per run, matched locally. Polling asks the indexers for every wanted release.',
     });
     appendSettingRow(section, {
-      label: 'RSS pull every (minutes, 5-1440)', key: 'rss_interval_minutes', value: settings.rss_interval_minutes || '30', min: '5', max: '1440', step: '5',
-      hint: 'Only used in RSS mode.',
+      label: 'RSS pull every (minutes, 10-1440)', key: 'rss_interval_minutes', value: settings.rss_interval_minutes || '30', min: '10', max: '1440', step: '5',
+      hint: 'Only used in RSS mode. Not below 10: NZBFinder bans an RSS fetch interval under 10 minutes, and the feed is cached there anyway, so 30 is plenty.',
     });
+    appendCategoryRows(section, settings);
     const indexerSearchStatus = el('span', { className: 'srw-key-status' });
     section.appendChild(el('br'));
     section.appendChild(el('button', {

@@ -35,6 +35,7 @@ import vr_check
 import duration_check
 import group_compare
 import kept_lists
+import scene_compare
 
 router = APIRouter(prefix="/maintenance", tags=["maintenance"])
 
@@ -476,6 +477,22 @@ def import_apply(body: dict):
                           ignore_renamers=bool(body.get("ignore_renamers")), trust=body.get("trust") or [])
 
 
+def _keep_unorganized_list_current(importer, scene_id):
+    """The hook fires for EVERY update of a scene, so the kept list of Maintenance > Untitled & unorganized (tab 2) follows what is done in Stash
+    itself (v0.249.3): a scene now Organized leaves it, a scene with an id that is not Organized (any more) makes it new at the next reading."""
+    try:
+        sc = importer._scene_by_id(scene_id)
+        if sc is None:
+            return
+        if sc.get("organized"):
+            kept_lists.update(_db, scene_compare.UNORGANIZED_LIST, lambda rows: [r for r in rows if str(r["id"]) != str(scene_id)])
+        elif sc.get("stash_ids"):
+            kept_lists.invalidate(_db, scene_compare.UNORGANIZED_LIST)
+        _slow_counts["at"] = 0.0
+    except Exception:
+        logger.info("organized hook: could not update the kept list", exc_info=True)
+
+
 @router.post("/import/organized-hook")
 def import_organized_hook(body: dict):
     """The plugin's Scene.Update.Post hook calls this when a scene was marked Organized in Stash (v0.191.0): what happens is decided by the
@@ -484,6 +501,7 @@ def import_organized_hook(body: dict):
     scene_id = body.get("scene_id")
     if scene_id is None:
         raise HTTPException(status_code=400, detail="scene_id is required")
+    _keep_unorganized_list_current(importer, scene_id)
     return importer.organized_scene(scene_id, (importer.setting("organized_hook") or "off").strip())
 
 
@@ -649,9 +667,9 @@ _slow_counts = {"at": 0.0, "data": {}}
 def slow_counts():
     """Badge numbers of the Maintenance side menu that need Stash (v0.239.1): Performers without scenes (the ones NOT on the watchlist), Unidentified
     scenes, Compare groups (open suggestions), Movies & groups (videos without a group). Kept for a minute; a number that cannot be read is left out (no badge)."""
+    import routers.compare as compare_router
     if time.time() - _slow_counts["at"] < 60:
         return _slow_counts["data"]
-    import routers.compare as compare_router
     out = {}
     for key, count in (
         ("performers", lambda: len([p for p in _movies().performers_without_scenes() if not p["on_watchlist"]])),
@@ -659,6 +677,9 @@ def slow_counts():
         # Movies & groups: the videos in the movie folders that are in no group yet (v0.241.8), from the kept list of that page. (Compare groups is
         # a tab of that page since v0.242.0; its number is in the tab.)
         ("movies", lambda: len(kept_lists.get(_db, "movies_no_group", lambda: _movies().videos_without_group())[0])),
+        # Untitled & unorganized (v0.248.0): untitled scenes without an id (from the kept Unidentified list) + scenes with an id that are not Organized
+        ("untitled", lambda: sum(1 for s in compare_router._compare().unidentified_list()["scenes"] if not s["title"])
+         + len(kept_lists.get(_db, scene_compare.UNORGANIZED_LIST, lambda: compare_router._compare().unorganized_list()["scenes"])[0])),
     ):
         try:
             out[key] = count()

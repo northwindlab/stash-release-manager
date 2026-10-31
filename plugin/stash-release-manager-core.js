@@ -11,7 +11,7 @@
   // rule and the bug it caused when this drifted). Change this if you
   // install under a different folder name.
   // Must equal `version:` in stash-release-manager.yml (scripts/test_plugin_version.py checks it).
-  const PLUGIN_VERSION = '0.246.16';
+  const PLUGIN_VERSION = '0.249.4';
   const PLUGIN_ID = 'stash-release-manager';
   const PLUGIN_NAME = 'StashReleaseManager';
 
@@ -2400,7 +2400,7 @@
     const q = f.search.trim().toLowerCase();
     return items.filter((x) => {
       if (q && fields.text) {
-        const text = `${fields.text(x) || ''} ${f.description && fields.description ? fields.description(x) || '' : ''}`;
+        const text = `${fields.text(x) || ''} ${f.description && fields.description ? fields.description(x) || '' : ''} ${f.tags && fields.tags ? fields.tags(x) || '' : ''}`;
         if (!text.toLowerCase().includes(q)) return false;
       }
       if (f.type !== 'both' && fields.type && fields.type(x) !== f.type) return false;

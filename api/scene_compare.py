@@ -8,6 +8,7 @@ distinct id, not per view). The only write is removing ONE provider id from ONE 
 is written, so it can be put back.
 """
 import film_names
+import kept_lists
 import base64
 import json
 import os
@@ -100,6 +101,8 @@ def delete_pair(db, pair_id):
     with db.connect() as conn:
         conn.execute("DELETE FROM compare_pair WHERE id = ?", (pair_id,))
 
+
+UNORGANIZED_LIST = "scenes_unorganized2"  # kept_lists name of Maintenance > Untitled & unorganized, tab 2
 
 _FP_LOCK = threading.Lock()  # the check / apply of the fingerprint results (table fingerprint_check) run one at a time
 
@@ -492,6 +495,52 @@ class SceneCompare:
         return {"scenes": out, "in_review": in_review, "listed_at": kept[2] if kept else None,
                 "checks": {x["id"]: stored[x["id"]] for x in out if x["id"] in stored}}
 
+    # ---------- scenes with a provider id that are not Organized (v0.248.0) ----------
+
+    def unorganized_list(self):
+        """Scenes that carry a StashDB / ThePornDB (or other stash-box) id but not the Organized flag, one Stash request. Each entry names the
+        providers its ids come from (an id of an endpoint nobody set up is shown under the endpoint's address)."""
+        stash, imp = self.get_stash(), self.get_importer()
+        data = stash._graphql("""query { findScenes(scene_filter: {stash_id_count: {value: 0, modifier: GREATER_THAN}, organized: false}, filter: {per_page: -1, sort: "id"}) {
+            scenes { id title date details tags { name } studio { name } stash_ids { endpoint stash_id } files { path width height duration size } } } }""", {})
+        out = []
+        for sc in data["findScenes"]["scenes"]:
+            f = (sc["files"] or [{}])[0]
+            path = f.get("path") or ""
+            folder = os.path.dirname(path)
+            providers = []
+            for sid in sc["stash_ids"]:
+                key = imp.provider_of_endpoint(sid["endpoint"]) if imp else None
+                providers.append({"key": key or sid["endpoint"], "name": imp.name_of(key) if key else sid["endpoint"], "id": sid["stash_id"]})
+            out.append({"id": sc["id"], "title": sc["title"] or "", "date": sc.get("date"), "studio": (sc.get("studio") or {}).get("name") or "",
+                        "file": os.path.basename(path), "folder": folder, "files": len(sc["files"] or []), "height": f.get("height"),
+                        "minutes": round(f["duration"] / 60, 1) if f.get("duration") else None, "mb": round(f["size"] / 1e6) if f.get("size") else None,
+                        "providers": providers, "details": sc.get("details") or "", "tags": [t["name"] for t in sc.get("tags") or []]})
+        return {"scenes": out}
+
+    def organized_set(self, scene_ids):
+        """Marks scenes Organized (up to 50 per call). Only scenes that still have a provider id and are not Organized yet are touched. NOTE: with the
+        setting organized_hook 'on' Stash's plugin hook then moves/renames the file as for a click in Stash itself (the same rules, see
+        library_import.organized_scene) -- that is the meaning of Organized in this project."""
+        stash = self.get_stash()
+        out = {}
+        for sid in [str(x) for x in scene_ids[:50]]:
+            try:
+                sc = stash._graphql("query($id: ID!) { findScene(id: $id) { id title organized stash_ids { endpoint } } }", {"id": sid})["findScene"]
+                if not sc:
+                    out[sid] = {"error": "scene not found in Stash"}
+                elif not sc["stash_ids"]:
+                    out[sid] = {"error": "the scene has no provider id"}
+                elif sc["organized"]:
+                    out[sid] = {"ok": True, "already": True}
+                else:
+                    stash._graphql("mutation($i: SceneUpdateInput!) { sceneUpdate(input: $i) { id } }", {"i": {"id": sid, "organized": True}})
+                    history.add("info", "history", "compare", "Scene marked Organized (Maintenance > Untitled & unorganized)", scene_id=sid, scene_title=sc["title"])
+                    out[sid] = {"ok": True}
+            except Exception as ex:  # noqa: BLE001
+                out[sid] = {"error": str(ex)}
+        return out
+
     def unidentified_check(self, scene_ids):
         """DRY RUN of the fingerprint assignment (nothing is written): StashDB's exact fingerprint lookup for these scenes (one request per 40), and
         ThePornDB's exact hashes (OSHASH / MD5 -- not its similarity-based PHASH, which stays with the per-scene tool in Review) for those StashDB does
@@ -565,6 +614,7 @@ class SceneCompare:
                 with _FP_LOCK:
                     fp_delete(self.db, sid)
                 unid_drop(self.db, [sid])
+                kept_lists.invalidate(self.db, UNORGANIZED_LIST)  # it has an id now and is not Organized: a row of that list
                 out[sid] = {"ok": True, "title": after["title"], "date": after.get("date")}
             except Exception as ex:  # noqa: BLE001
                 out[sid] = {"error": str(ex)}

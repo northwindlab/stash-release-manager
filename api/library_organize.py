@@ -804,6 +804,9 @@ class Organizer:
             why = next((i.get("reason") or i.get("check") for k in ("conflict", "needs_check") for i in plan[k]), None)
             return {"handled": True, "note": f"was not moved: {why}" if why else "is already where it belongs"}
         rel = lambda p: p[len(self._root()):]  # noqa: E731
+        if mode == "dry":  # v0.249.0: the preview of "Mark organized" -- writes nothing
+            conflict = self.renamer_guard(False)
+            return {"handled": True, "preview": item, "blocked": conflict["error"] if conflict else None}
         if mode == "preview":
             history.add("info", "history", "organize", f"Organized preview (nothing moved): {rel(path)} -> {rel(item['new_path'])}",
                         scene_title=title, details={"stash_scene": scene["id"], "old": path, "new": item["new_path"], "kind": "library"})

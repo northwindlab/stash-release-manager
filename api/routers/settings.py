@@ -9,6 +9,7 @@ import re
 
 from fastapi import APIRouter, HTTPException
 
+import category_filter
 import file_naming
 import film_names
 import indexer_repo
@@ -415,6 +416,8 @@ DEFAULTS = {
     # back-off for own queries (2026-09-30, the indexer complained about the query volume).
     "search_mode": "polling",
     "rss_interval_minutes": "30",
+    # Result categories that are dropped from every search (comma separated ids, see category_filter.py): Pack 6050, Imageset 6060 by default.
+    "excluded_categories": "6050,6060",
 }
 
 
@@ -689,8 +692,11 @@ def set_one(key: str, body: dict):
         raise HTTPException(400, f"search_mode must be 'polling' or 'rss', got {value!r}")
     if key == "max_grabs_per_day" and not (value.isdigit() and 1 <= int(value) <= 1000):
         raise HTTPException(400, f"max_grabs_per_day must be a whole number between 1 and 1000, got {value!r}")
-    if key == "rss_interval_minutes" and not (value.isdigit() and 5 <= int(value) <= 1440):
-        raise HTTPException(400, f"rss_interval_minutes must be a whole number between 5 and 1440, got {value!r}")
+    if key == "rss_interval_minutes" and not (value.isdigit() and 10 <= int(value) <= 1440):
+        # NZBFinder (2026-10): "Setting your RSS fetch interval below 10 minutes will result in a ban" -- the feed is cached anyway
+        raise HTTPException(400, f"rss_interval_minutes must be a whole number between 10 and 1440, got {value!r}")
+    if key == "excluded_categories" and not category_filter.valid(value):
+        raise HTTPException(400, f"excluded_categories must be category ids between 6000 and 6999, comma separated, got {value!r}")
     if key == "search_backend" and value not in SEARCH_BACKENDS:
         raise HTTPException(400, f"search_backend must be one of {SEARCH_BACKENDS}, got {value!r}")
     if key == "fallback_resolution_days" and not (value.isdigit() and 0 <= int(value) <= 365):

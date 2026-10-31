@@ -26,10 +26,19 @@ indexer_search.search_and_grab() takes one of these as `search_source`:
 import logging
 from concurrent.futures import ThreadPoolExecutor
 
+import category_filter
 from indexer_search import normalize_prowlarr_release
 from newznab_client import NewznabClient
 
 logger = logging.getLogger(__name__)
+
+
+_excluded_categories = lambda: set()  # noqa: E731 -- main.py sets it: the categories switched off in Settings (category_filter.py)
+
+
+def set_excluded_categories(fn):
+    global _excluded_categories
+    _excluded_categories = fn
 
 
 class ProwlarrSource:
@@ -40,7 +49,8 @@ class ProwlarrSource:
         self.client = client
 
     def search(self, query):
-        return usable_protocols_only([normalize_prowlarr_release(r) for r in self.client.search(query)])
+        raw = category_filter.drop_excluded(self.client.search(query), _excluded_categories())
+        return usable_protocols_only([normalize_prowlarr_release(r) for r in raw])
 
     def indexer_priorities(self):
         """Best-effort, same as indexer_search._indexer_priorities() -- a
@@ -88,7 +98,7 @@ class IndexersSource:
     def _search_one(self, row, query):
         client = NewznabClient(row["url"], row["api_key"], row["api_path"])
         torrent = row.get("type") == "torznab"
-        items = client.search(query, row["categories"] or "6000")
+        items = category_filter.drop_excluded(client.search(query, row["categories"] or "6000"), _excluded_categories())
         if torrent:  # *arr "Minimum Seeders": fewer are dropped; the indexer's seed goals travel with the result
             items = [i for i in items if (i.get("seeders") or 0) >= (row.get("minimum_seeders") if row.get("minimum_seeders") is not None else 1)]
         return [normalize_prowlarr_release({

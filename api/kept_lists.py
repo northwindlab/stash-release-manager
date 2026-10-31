@@ -35,4 +35,16 @@ def invalidate(db, *names):
             conn.execute("DELETE FROM maintenance_state WHERE key = ?", (f"kept:{name}",))
 
 
+def update(db, name, change):
+    """Changes a kept list in place (change(data) -> new data) when there is one; nothing is made new. Keeps its time."""
+    key = f"kept:{name}"
+    with db.connect() as conn:
+        row = conn.execute("SELECT value FROM maintenance_state WHERE key = ?", (key,)).fetchone()
+        if not row:
+            return
+        kept = json.loads(row["value"])
+        kept["data"] = change(kept["data"])
+        conn.execute("UPDATE maintenance_state SET value = ? WHERE key = ?", (json.dumps(kept), key))
+
+
 MOVIE_LISTS = ("movies_no_group", "movies_groups_empty", "movies_group_namesakes")

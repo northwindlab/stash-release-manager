@@ -687,6 +687,12 @@ def main():
         result = _post(sidecar_url, "/maintenance/compare/unidentified/check", {"scene_ids": args.get("scene_ids") or []}, timeout=300)
     elif mode == "compare_unidentified_apply":
         result = _post(sidecar_url, "/maintenance/compare/unidentified/apply", {"scene_ids": args.get("scene_ids") or []}, timeout=300)
+    elif mode == "compare_unorganized":
+        result = _get(sidecar_url, "/maintenance/compare/unorganized" + ("?refresh=true" if args.get("refresh") else ""), timeout=120)
+    elif mode == "compare_unorganized_preview":
+        result = _post(sidecar_url, "/maintenance/compare/unorganized/preview", {"scene_ids": args.get("scene_ids") or []}, timeout=120)
+    elif mode == "compare_unorganized_set":
+        result = _post(sidecar_url, "/maintenance/compare/unorganized/organize", {"scene_ids": args.get("scene_ids") or []}, timeout=300)
     elif mode == "setup_status":
         result = _get(sidecar_url, "/setup/status", timeout=15)
     elif mode == "sidecar_health":

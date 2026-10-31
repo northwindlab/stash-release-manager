@@ -1,6 +1,6 @@
 name: StashReleaseManager
 description: Tracking, acquisition, sorting and housekeeping for your Stash library -- watches StashDB/ThePornDB for new releases of what you follow, searches your indexers, imports, organizes and identifies, with a Maintenance page for duplicates and reviews (formerly "Stash Release Watcher").
-version: 0.246.16
+version: 0.249.4
 url: https://github.com/northwindlab/stash-release-manager
 
 ui:

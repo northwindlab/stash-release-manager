@@ -44,6 +44,7 @@ from whisparr_client import WhisparrClient
 from sabnzbd_client import SabnzbdClient
 from theporndb_client import ThePornDBClient
 from prowlarr_client import ProwlarrClient
+import category_filter
 import search_sources
 from search_sources import FeedSource, IndexersSource, ProwlarrSource, UnavailableSource, older_than_feed
 import indexer_repo
@@ -924,6 +925,7 @@ watcher.PROMOTE_HOOK = promote_imported_sibling
 
 
 search_sources.set_protocol_checker(lambda protocol: download_client_repo.pick_for_protocol(db, protocol) is not None)
+search_sources.set_excluded_categories(lambda: category_filter.parse(get_setting_value(db, "excluded_categories", category_filter.DEFAULT_EXCLUDED)))
 
 
 def get_film_search_source():
@@ -2153,7 +2155,7 @@ async def _indexer_search_loop():
             # RSS mode ticks on its own, much shorter clock (one feed pull per tick).
             if get_setting_value(db, "search_mode", "polling") == "rss":
                 try:
-                    interval_hours = max(float(get_setting_value(db, "rss_interval_minutes", "30") or 30), 5) / 60
+                    interval_hours = max(float(get_setting_value(db, "rss_interval_minutes", "30") or 30), 10) / 60  # never below 10 min (NZBFinder bans)
                 except ValueError:
                     interval_hours = 0.5
         await asyncio.sleep(max(interval_hours, 0.1) * 3600)

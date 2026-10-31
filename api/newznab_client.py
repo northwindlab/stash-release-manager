@@ -70,6 +70,9 @@ class NewznabClient:
         items = []
         for item in root.iter("item"):
             attrs = {a.get("name"): a.get("value") for ns in (_NEWZNAB_NS, _TORZNAB_NS) for a in item.iter(f"{ns}attr")}
+            # every category the item is filed under (the attribute can occur several times): the same shape as Prowlarr's results
+            cats = [{"id": int(a.get("value"))} for ns in (_NEWZNAB_NS, _TORZNAB_NS) for a in item.iter(f"{ns}attr")
+                    if a.get("name") == "category" and str(a.get("value") or "").isdigit()]
             size = attrs.get("size")
             if size is None:
                 enclosure = item.find("enclosure")
@@ -90,6 +93,7 @@ class NewznabClient:
                 "seeders": _int(attrs.get("seeders")), "peers": _int(attrs.get("peers")),
                 "infoHash": (attrs.get("infohash") or "").lower() or None, "magnetUrl": attrs.get("magneturl"),
                 "title": item.findtext("title") or "",
+                "categories": cats,
                 "size": int(size) if size and str(size).isdigit() else None,
                 "age": age,
                 "downloadUrl": link,
