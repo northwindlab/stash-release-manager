@@ -11,7 +11,7 @@
   // rule and the bug it caused when this drifted). Change this if you
   // install under a different folder name.
   // Must equal `version:` in stash-release-manager.yml (scripts/test_plugin_version.py checks it).
-  const PLUGIN_VERSION = '0.258.2';
+  const PLUGIN_VERSION = '0.258.3';
   const PLUGIN_ID = 'stash-release-manager';
   const PLUGIN_NAME = 'StashReleaseManager';
 
@@ -206,7 +206,9 @@
     if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) return url;
     try {
       const u = new URL(url);
-      return /^\/(performer|studio|scene|group|image|gallery|tag)\//.test(u.pathname) ? u.pathname + u.search : url;
+      // Stash's own links are /<kind>/<numeric id>/<one word> (e.g. /scene/123/screenshot). A provider CDN path also begins with /scene/ or
+      // /performer/ (ThePornDB: /scene/6a/64/bf/.../bg-name.jpg): it must keep its host, or the picture is looked up on the Stash server (v0.258.3).
+      return /^\/(performer|studio|scene|group|image|gallery|tag)\/\d+\/[A-Za-z_]+$/.test(u.pathname) ? u.pathname + u.search : url;
     } catch (e) { return url; }
   }
 

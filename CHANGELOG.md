@@ -6,6 +6,9 @@ Version rules (from 0.199.0 on; before, almost every change raised the MINOR num
 MINOR = a new capability a user can use, or a change that needs the user to act; MAJOR = something that worked breaks. 1.0.0 comes when the
 install guide has been proven on other machines. Documentation only gets no version.
 
+## 0.258.3
+- **Fix: covers of ThePornDB movies and scenes were missing** (e.g. Activity > Import failed). The helper that turns Stash's own picture links into relative ones also shortened ThePornDB's CDN links (same path start `/scene/...`), so the picture was requested from the Stash server. Only Stash's own link form is shortened now. Plugin only.
+
 ## 0.258.2
 - **The plugin package now contains the `icons/` folder** (the packaging step had left it out). Packaging only.
 
