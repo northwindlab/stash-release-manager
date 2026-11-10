@@ -581,6 +581,7 @@ class Database:
         self._migrate_release_targeted_search(conn)
         self._migrate_release_studio_mute(conn)
         self._migrate_release_dismissed_prev(conn)
+        self._migrate_convert_accept_duration(conn)
         self._migrate_release_tags(conn)
         self._migrate_release_cast_pairing(conn)
         self._migrate_vr_verdict_manual(conn)
@@ -863,6 +864,13 @@ class Database:
             conn.execute("ALTER TABLE release ADD COLUMN muted INTEGER NOT NULL DEFAULT 0")
         if "muted_prev_status" not in cols:
             conn.execute("ALTER TABLE release ADD COLUMN muted_prev_status TEXT")
+
+    def _migrate_convert_accept_duration(self, conn):
+        """Adds `convert_candidate.accept_duration` (v0.258.7): the length (seconds) the converted file is checked against INSTEAD of the length in
+        the source's header. For a file whose header promises more than the file holds (cut off): the user accepted the shorter real length."""
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(convert_candidate)").fetchall()}
+        if cols and "accept_duration" not in cols:
+            conn.execute("ALTER TABLE convert_candidate ADD COLUMN accept_duration REAL")
 
     def _migrate_release_dismissed_prev(self, conn):
         """Adds `release.dismissed_prev_status` (v0.253.8) and a trigger that fills it: whatever sets a row to 'dismissed' (single Dismiss, bulk,

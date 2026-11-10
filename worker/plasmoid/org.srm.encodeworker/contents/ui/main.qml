@@ -20,7 +20,7 @@ PlasmoidItem {
     readonly property bool alive: status !== null && status.state !== "stopped"
         && (now - status.updated_at) < Math.max(45, (status.interval || 30) * 2 + 15)
     readonly property bool encoding: alive && status.state === "encoding"
-    readonly property bool byHand: alive && serviceState !== "active"   // running, but not as our service: the widget cannot stop it
+    readonly property bool byHand: alive && (serviceState === "inactive" || serviceState === "failed")   // running, but not as our service: the widget cannot stop it
     readonly property bool autoQueue: alive && status.auto_queue === true   // the worker's own switch file, see srm_encode_worker.auto_queue_file()
     // a finished job is shown for 20 s only; a failure stays until the next job
     readonly property bool showLast: status !== null && status.last_result !== null && status.last_result !== undefined

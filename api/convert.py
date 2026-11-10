@@ -139,6 +139,20 @@ def queue(db, ids):
     return n
 
 
+def accept_length(db, items):
+    """The user accepts that a source file is shorter than its header says (cut off): `items` = [{"id", "seconds"}] with the length the file really
+    decodes to. The row is queued again; the worker and the sidecar check the converted file against that length. Returns the number queued."""
+    n = 0
+    with db.connect() as conn:
+        for it in items:
+            sec = float(it["seconds"])
+            if sec <= 0:
+                continue
+            n += conn.execute("UPDATE convert_candidate SET accept_duration = ?, status = 'queued', error = NULL, queued_at = datetime('now'), percentage = NULL, "
+                              "speed_x = NULL, seconds_left = NULL WHERE id = ? AND status IN ('wanted', 'failed')", (sec, int(it["id"]))).rowcount
+    return n
+
+
 def cancel(db, ids):
     """Queued and running rows go back to 'wanted' (a running worker is told to stop with its next progress report)."""
     n = 0
@@ -174,7 +188,8 @@ def claim_next(db, worker, to_local, auto=False):
                      (worker, now, row["id"]))
     source = to_local(row["file_path"])
     return {"kind": "convert", "job_id": row["id"], "provider": "convert", "stash_id": str(row["id"]), "mode": row["mode"], "source": source,
-            "dest": to_local(_written_path(row["file_path"])), "title": row["scene_title"]}
+            "dest": to_local(_written_path(row["file_path"])), "title": row["scene_title"],
+            "accept_duration": row["accept_duration"]}
 
 
 def progress(db, job_id, worker, percentage, speed_x, seconds_left):
@@ -229,9 +244,10 @@ def finish(db, stash_client, to_local, recycle, row, probe=transcode.probe):
             if not out or out.get("vcodec") != "h264":
                 transcode._remove(dst_local)
                 return _fail(db, row_id, "the converted file cannot be read or is not H.264")
-            if row.get("duration") and abs(out["duration"] - row["duration"]) > max(2.0, row["duration"] * 0.01):
+            expected = row.get("accept_duration") or row.get("duration")  # accept_duration: the user accepted the real (shorter) length of a cut-off source
+            if expected and abs(out["duration"] - expected) > max(2.0, expected * 0.01):
                 transcode._remove(dst_local)
-                return _fail(db, row_id, f"the converted file is {out['duration']:.0f} s long, the original {row['duration']:.0f} s")
+                return _fail(db, row_id, f"the converted file is {out['duration']:.0f} s long, the original {expected:.0f} s")
         _set(db, row_id, status="replacing")
         replace(db, stash_client, to_local, recycle, row)
     except Retry as e:

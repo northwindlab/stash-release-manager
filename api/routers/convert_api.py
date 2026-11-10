@@ -72,6 +72,12 @@ def convert_queue(body: dict):
     return {"queued": convert.queue(_db, body.get("ids") or [])}
 
 
+@router.post("/accept-length")
+def convert_accept_length(body: dict):
+    """Body {"items": [{"id", "seconds"}]}: a source whose header is longer than what it holds; convert again and check against `seconds`."""
+    return {"queued": convert.accept_length(_db, body.get("items") or [])}
+
+
 @router.post("/cancel")
 def convert_cancel(body: dict):
     return {"cancelled": convert.cancel(_db, body.get("ids") or [])}

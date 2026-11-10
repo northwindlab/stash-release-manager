@@ -120,7 +120,10 @@ def run_convert_job(base, name, job, maps, status):
 
     started = time.time()
     try:
-        res = transcode.convert(src, dst, job["mode"], progress=progress)
+        info = transcode.probe(src)
+        if info and job.get("accept_duration"):  # a cut-off source: its header promises more than the file holds, the user accepted the real length
+            info["duration"] = float(job["accept_duration"])
+        res = transcode.convert(src, dst, job["mode"], progress=progress, info=info)
     except Exception as e:  # never leave a half-written file behind
         res = {"ok": False, "error": f"{type(e).__name__}: {e}"}
         transcode._remove(dst)
