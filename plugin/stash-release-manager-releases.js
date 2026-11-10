@@ -1402,7 +1402,7 @@
           let candidate = null;
           try { candidate = JSON.parse(r.review_candidate); } catch (e) { candidate = null; }
           if (candidate) {
-            const sizeGb = candidate.size ? `${(candidate.size / 1e9).toFixed(2)} GB` : 'unknown size';
+            const sizeGb = window.SRW.sizeText(candidate.size);
             const reviewStatus = el('span', { className: 'srw-key-status' });
             const reviewBox = el('div', { className: 'srw-review-candidate' }, [
               el('span', {

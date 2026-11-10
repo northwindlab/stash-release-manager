@@ -6,6 +6,18 @@ Version rules (from 0.199.0 on; before, almost every change raised the MINOR num
 MINOR = a new capability a user can use, or a change that needs the user to act; MAJOR = something that worked breaks. 1.0.0 comes when the
 install guide has been proven on other machines. Documentation only gets no version.
 
+## 0.258.6
+(Takeover of AnonTester's fork: his 0.258.3 - 0.258.5, applied together as 0.258.6 because our own 0.258.3 (the cover fix below) already carried that number; his entries follow unchanged.)
+## 0.258.5
+- **Fix: the Last search and Search… windows keep their height while the results are filtered or paged**, so the window no longer shrinks and grows (and moves the filter box away from the mouse). It still grows when more room is needed. Plugin only.
+
+## 0.258.4
+- **Release sizes in the Last search list, the manual search and the review rows show MB below 1 GB** ("90 MB" instead of "0.09 GB"); from 1 GB it stays GB with two decimals. Plugin only.
+
+## 0.258.3
+- **Fix: "Grab" in the Last search list and in the manual search disappears once the result is grabbed**, so it cannot be clicked again (it only added the text "grabbed" and left the button).
+- **Fix: a release name with 540p (also 576p, 360p) is taken for the 480p class** instead of "no resolution", which showed "~480p (estimated)" and ranked it behind named ones. The list shows "480p (540p in the name)". 540p is not a class of its own: the quality profile's lowest class is 480p (Whisparr's too), and every standard-definition height counts as it.
+
 ## 0.258.3
 - **Fix: covers of ThePornDB movies and scenes were missing** (e.g. Activity > Import failed). The helper that turns Stash's own picture links into relative ones also shortened ThePornDB's CDN links (same path start `/scene/...`), so the picture was requested from the Stash server. Only Stash's own link form is shortened now. Plugin only.
 

@@ -11,7 +11,7 @@
   // rule and the bug it caused when this drifted). Change this if you
   // install under a different folder name.
   // Must equal `version:` in stash-release-manager.yml (scripts/test_plugin_version.py checks it).
-  const PLUGIN_VERSION = '0.258.3';
+  const PLUGIN_VERSION = '0.258.6';
   const PLUGIN_ID = 'stash-release-manager';
   const PLUGIN_NAME = 'StashReleaseManager';
 
@@ -1909,10 +1909,23 @@
   }
 
   // The facts of a result as small chips (indexer, torrent swarm, quality, size, age); `quality` is the label already worked out by the caller.
+  // A release size: GB with two decimals from 1 GB, MB below ("0.09 GB" tells nothing), KB for the tiny ones
+  function sizeText(bytes) {
+    if (!bytes) return 'unknown size';
+    if (bytes >= 999.5e6) return `${(bytes / 1e9).toFixed(2)} GB`;
+    if (bytes >= 1e6) return `${Math.round(bytes / 1e6)} MB`;
+    return `${Math.max(1, Math.round(bytes / 1e3))} KB`;
+  }
+
+  // "480p", or "480p (540p in the name)" when the name stated a standard-definition height the profile counts as its 480p class
+  function resolutionText(resolution, namedHeight) {
+    return namedHeight && namedHeight !== resolution ? `${resolution}p (${namedHeight}p in the name)` : `${resolution}p`;
+  }
+
   function resultChips(c, quality) {
     const chips = [c.indexer || 'unknown indexer'];
     if (c.protocol === 'torrent') chips.push(`torrent${c.seeders != null ? ` · ${c.seeders} seeders` : ''}${c.peers != null ? ` · ${c.peers} peers` : ''}`);
-    chips.push(quality, c.size ? `${(c.size / 1e9).toFixed(2)} GB` : 'unknown size', ageWords(c.age));
+    chips.push(quality, sizeText(c.size), ageWords(c.age));
     return el('span', { className: 'srw-chips' }, chips.map((t) => el('span', { className: 'srw-chip', textContent: t })));
   }
 
@@ -2047,7 +2060,7 @@
 
   // A dialog in Stash's own modal markup (Bootstrap: .modal / .modal-dialog / .modal-content), so a theme restyles it like Stash's own dialogs
   // (v0.238.0). `title` is the heading, `node` the content; Escape, the x and a click beside the dialog close it. Returns {close, body}.
-  function openModal(title, node, { onClose = null, size = 'modal-xl', subtitle = null } = {}) {
+  function openModal(title, node, { onClose = null, size = 'modal-xl', subtitle = null, keepHeight = false } = {}) {
     applyThemeColors();
     const backdrop = el('div', { className: 'modal-backdrop fade show srw-modal-backdrop' });
     const closeBtn = el('button', { type: 'button', className: 'close', 'aria-label': 'Close' }, [el('span', { 'aria-hidden': 'true', textContent: '×' })]);
@@ -2078,6 +2091,17 @@
     document.body.append(backdrop, modal);
     // The dialog's own surface color (the theme's), for things that stick to the top of its scrolling body and need an opaque ground (the player bar).
     try { modal.style.setProperty('--srw-surface', getComputedStyle(dialog.querySelector('.modal-content')).backgroundColor); } catch (e) { /* the stylesheet's fallback */ }
+    // keepHeight: the dialog never gets lower than it has been (a result list that is filtered or paged would otherwise shrink and grow the
+    // dialog, which re-centres it and moves the filter box away from the mouse). It still grows when the content needs more, up to the window.
+    if (keepHeight && typeof ResizeObserver === 'function') {
+      const content = dialog.querySelector('.modal-content');
+      let floor = 0;
+      const ro = new ResizeObserver(() => {
+        const h = Math.ceil(content.getBoundingClientRect().height);
+        if (h > floor) { floor = h; content.style.minHeight = `${h}px`; }
+      });
+      ro.observe(content);
+    }
     return { close, body };
   }
 
@@ -2106,7 +2130,7 @@
       close,
       open(node) {
         panel = node;
-        modal = openModal(title, node, { subtitle, onClose: () => { if (panel === node) { panel = null; modal = null; } } });
+        modal = openModal(title, node, { subtitle, keepHeight: true, onClose: () => { if (panel === node) { panel = null; modal = null; } } });
       },
     };
   }
@@ -2180,11 +2204,10 @@
     return wrap;
 
     function buildLogRow(c) {
-        const qualityLabel = c.vr ? 'VR' : (c.resolution ? `${c.resolution}p` : 'unknown quality');
-        const sizeGb = c.size ? `${(c.size / 1e9).toFixed(2)} GB` : 'unknown size';
+        const qualityLabel = c.vr ? 'VR' : (c.resolution ? resolutionText(c.resolution, c.named_height) : 'unknown quality');
         const swarm = c.protocol === 'torrent'
           ? ` (torrent${c.seeders != null ? `, ${c.seeders} seeders` : ''}${c.peers != null ? `, ${c.peers} peers` : ''})` : '';
-        const quality = c.vr ? 'VR' : (c.resolution ? `${c.resolution}p` : (c.est_resolution ? `~${c.est_resolution}p (estimated)` : 'unknown quality'));
+        const quality = c.vr ? 'VR' : (c.resolution ? resolutionText(c.resolution, c.named_height) : (c.est_resolution ? `~${c.est_resolution}p (estimated)` : 'unknown quality'));
         const rowStatus = el('span', { className: 'srw-key-status' });
         // Grab = this result instead of what is running (a running torrent is removed with its data), same as the Manual search's Grab
         const grab = el('button', {
@@ -2197,6 +2220,7 @@
               if (result.error) { rowStatus.textContent = ` error: ${result.error}`; notify(`Grab failed: ${r.title || ''}`, result.error, 'error'); return; }
               if (!result.grab) { rowStatus.textContent = ` not grabbed: ${String(result.result || 'refused').replace(/_/g, ' ')}`; return; }
               rowStatus.textContent = ' grabbed';
+              grab.remove(); // grabbed: nothing left to click (a second Grab would start the same download again)
               notify(`Grabbed: ${r.title || ''}`, `${c.title} (${c.indexer || 'indexer'}) -- sent to the download client.`, 'success');
               if (onGrabbed) await onGrabbed();
             } catch (err) { rowStatus.textContent = ` error: ${err.message}`; }
@@ -2256,10 +2280,9 @@
       const resultsWrap = el('div');
 
       function buildResultRow(candidate) {
-        const sizeGb = candidate.size ? `${(candidate.size / 1e9).toFixed(2)} GB` : 'unknown size';
         const quality = (candidate.quality && candidate.quality.quality) || {};
         // a name without a resolution: the sidecar judges one from the scene's length and the size (est_resolution), marked with "~"
-        const qualityLabel = quality.source === 'vr' ? 'VR' : (quality.resolution ? `${quality.resolution}p`
+        const qualityLabel = quality.source === 'vr' ? 'VR' : (quality.resolution ? resolutionText(quality.resolution, candidate.named_height)
           : (candidate.est_resolution ? `~${candidate.est_resolution}p (estimated)` : 'unknown quality'));
         const rowStatus = el('span', { className: 'srw-key-status' });
         // One grab button: `grab` = the caller's own grab (null = the default grab of this panel), `ask` = the confirm text
@@ -2282,6 +2305,7 @@
                   return;
                 }
                 rowStatus.textContent = ' grabbed';
+                actionsBox.querySelectorAll('button').forEach((btn) => btn.remove()); // grabbed: no Grab button is left to click again
                 notify(`Grabbed: ${r.title || ''}`, `${candidate.title} (${candidate.indexer || 'indexer'}) -- sent to the download client.`, 'success');
                 if (onGrabbed) await onGrabbed();
               } catch (err) {
@@ -2290,6 +2314,14 @@
             });
           },
         });
+        const actionsBox = el('div', { className: 'srw-result-actions' });
+        actionsBox.append(...[
+          grabButton('Grab', 'srw-btn srw-btn-primary', null, `Download "${candidate.title}" for "${r.title}"?`),
+          opts && opts.grabAsScene ? grabButton('Grab as one scene', 'srw-btn', opts.grabAsScene,
+            `Download "${candidate.title}" as ONE SCENE of "${r.title}"? It joins the movie's group; the movie stays on the wishlist for the other parts.`,
+            'The file is only a part of the movie: it is added to its group and the movie stays wanted for the other parts') : null,
+          rowStatus,
+        ].filter(Boolean));
         return el('div', { className: 'srw-manual-search-result srw-result-row' }, [
           el('div', { className: 'srw-result-main' }, [
             el('div', { className: 'srw-result-head' }, [releaseTitleNode(candidate.title, candidate.infoUrl)]),
@@ -2301,13 +2333,7 @@
                 title: `${candidate.tried} (blocklist of this scene)` }) : null,
             ]),
           ]),
-          el('div', { className: 'srw-result-actions' }, [
-            grabButton('Grab', 'srw-btn srw-btn-primary', null, `Download "${candidate.title}" for "${r.title}"?`),
-            opts && opts.grabAsScene ? grabButton('Grab as one scene', 'srw-btn', opts.grabAsScene,
-              `Download "${candidate.title}" as ONE SCENE of "${r.title}"? It joins the movie's group; the movie stays on the wishlist for the other parts.`,
-              'The file is only a part of the movie: it is added to its group and the movie stays wanted for the other parts') : null,
-            rowStatus,
-          ]),
+          actionsBox,
         ]);
       }
 
@@ -3458,7 +3484,7 @@
   window.SRW = {
     PLUGIN_ID, PLUGIN_NAME,
     getContentScope, resetContentScope, scopeAllows,
-    getSettings, runOp, sidecarWsUrl, stashUrl, imageSrc, coverImage, copyText,
+    getSettings, runOp, sidecarWsUrl, stashUrl, imageSrc, coverImage, copyText, sizeText,
     getRoute, onNavigate, initNavigationWatcher,
     el, waitForElement, entityIcon, buildPageHeader,
     watchKind, keepResult, recallResult, forgetResult, keptNote, searchStatusLabel, setBusy, openModal, sceneSubtitle, iconButton, busyIcon, ageWords, ageWarning, confirmInline, buildManagedList, buildSearchActions, whenNoOpenPanel, buildManualSearch, getSearchCapabilities,

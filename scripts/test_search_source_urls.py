@@ -83,6 +83,12 @@ check("SD segment -> 480", reso("Site.26.09.12.Name.SD.XXX.MP4-GRP") == 480)
 check("normal group stays unknown", reso("Nympho.26.10.11.Lily.XXX.MP4-P0RNL0V3R") is None)
 check("explicit 1080p wins over SD marker", reso("Site.26.09.12.Name.1080p.MP4-GRPX") == 1080)
 check("lowercase 'sd' in a word is no marker", reso("Site.Madison.sd.Name.XXX.MP4-GRP") is None)
+# standard-definition heights in the name (0.258.3): 360p / 540p / 576p are the 480p class, the stated height is kept for display
+check("540p in the name -> 480 class", reso("Site.26.09.12.Name.XXX.540p.MP4-GRP") == 480)
+check("576p / 360p -> 480 class", reso("Site.Name.576p.MP4-GRP") == 480 and reso("Site.Name.360p.MP4-GRP") == 480)
+check("720p stays 720", reso("Site.Name.720p.MP4-GRP") == 720)
+check("named height 540 reported", isr.torrent_facts({"title": "Site.Name.540p.MP4-GRP"}).get("named_height") == 540)
+check("no named height for 480p / 1080p", "named_height" not in isr.torrent_facts({"title": "Site.Name.480p.MP4"}) and "named_height" not in isr.torrent_facts({"title": "Site.Name.1080p.MP4"}))
 # scenes older than the RSS feed reaches (v0.213.4)
 import datetime as _dt
 import search_sources as ss

@@ -536,7 +536,21 @@ def _indexer_priorities(whisparr_client):
         return {}
 
 
-_RESOLUTION_RE = re.compile(r"\b(2160|1440|1080|720|480)p\b", re.IGNORECASE)
+_RESOLUTION_RE = re.compile(r"\b(2160|1440|1080|720|576|540|480|360)p\b", re.IGNORECASE)
+# Heights below 720 are standard definition: the quality profile's lowest class is 480p (like Whisparr's and the library's naming), so a name
+# with 360p / 540p / 576p counts as 480p instead of "no resolution" (which was judged from the size and shown as "~480p (estimated)").
+_SD_CLASS_MAX = 576
+
+
+def name_height(title):
+    """The height a release name states ("...540p..." -> 540), None without one."""
+    m = _RESOLUTION_RE.search(title or "")
+    return int(m.group(1)) if m else None
+
+
+def resolution_class(height):
+    """The quality class of a named height: the height itself from 720 up, 480 for every standard-definition height."""
+    return 480 if height is not None and height <= _SD_CLASS_MAX else height
 # Standard definition without a "480p" in the name (v0.211.6): an "SD" segment ("Name.SD.XXX.MP4") or the SD variant of a release group
 # ("...XXX.MP4-GRPX" next to "...-P0RNL0V3R"). Uppercase only, so words and names cannot trip it. Such a release counts as 480p;
 # before, no resolution at all meant "unknown" and let it through to Needs review.
@@ -771,8 +785,7 @@ def normalize_prowlarr_release(raw):
     routers/releases.py's manual-search endpoint reuses this directly
     for display, not just for `_select_best()`'s own filtering."""
     title = raw.get("title") or ""
-    m = _RESOLUTION_RE.search(title)
-    resolution = int(m.group(1)) if m else None
+    resolution = resolution_class(name_height(title))
     if resolution is None and _SD_RE.search(title):
         resolution = 480
     source = "vr" if (_VR_RE.search(title) or _VR_MARKER_RE.search(title)) else "web"
@@ -948,6 +961,9 @@ def torrent_facts(r, duration_s=None):
             out["seeders"] = r["seeders"]
         if r.get("peers") is not None:
             out["peers"] = r["peers"]
+    named = name_height(r.get("title"))
+    if named is not None and resolution_class(named) != named:
+        out["named_height"] = named  # a name with 540p is taken for the 480p class; the list says what the name stated
     if duration_s:
         codec = torrent_estimate.codec_of(r.get("title"))
         quality = (r.get("quality") or {}).get("quality") or {}

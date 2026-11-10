@@ -916,7 +916,7 @@
     // `sceneDate` (wishlist rows): a candidate release that is much OLDER than the scene's own release date cannot be this scene.
     function candidateLine(c, sceneDate) {
       const facts = [c.indexer, c.protocol === 'torrent' ? `Torrent${c.seeders != null ? `, ${c.seeders} seeders` : ''}` : null,
-        c.size ? `${(c.size / 1e9).toFixed(1)} GB` : null,
+        c.size ? window.SRW.sizeText(c.size) : null,
         c.age != null ? window.SRW.ageWords(c.age) : null].filter(Boolean).join(' · ');
       const warning = window.SRW.ageWarning(c.age, sceneDate);
       return el('div', { className: 'srw-review-box' }, [
