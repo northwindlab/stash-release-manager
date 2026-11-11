@@ -3442,7 +3442,9 @@
       const name = (c) => (c.scene_title || c.file_path.split('/').pop());
       const parts = [
         ...running.map((c) => `${name(c)}: ${c.percentage || 0} %${c.seconds_left ? `, about ${Math.max(1, Math.round(c.seconds_left / 60))} min left` : ''}`),
-        ...checking.map((c) => `${name(c)}: ${phaseText(c, c.status === 'verifying' ? 'checking the converted file' : 'putting it into the scene')}`),
+        // only the three that have waited longest (the finishing step runs one file at a time, Stash can be busy: dozens pile up)
+        ...checking.slice(0, 3).map((c) => `${name(c)}: ${phaseText(c, c.status === 'verifying' ? 'checking the converted file' : 'putting it into the scene')}`),
+        ...(checking.length > 3 ? [`and ${checking.length - 3} more finishing`] : []),
       ];
       activeLine.append(`Converting now (${running.length} running${checking.length ? `, ${checking.length} finishing` : ''}${queued.length ? `, ${queued.length} waiting` : ''}): ${parts.join(' · ') || 'waiting for an encode worker'} `,
         el('a', { href: '#', textContent: 'show', onClick: (e) => { e.preventDefault(); stateSelect.value = 'active'; selected.clear(); syncBulkButtons(); view.reset(); } }));
