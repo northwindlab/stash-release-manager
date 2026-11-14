@@ -128,8 +128,9 @@ def sweep_review_candidates(db):
         names = [n for n in (r["cast_names"] or "").split("|") if n]
         if not title or not names:
             continue
+        far = indexer_search._release_date_far_off(r["scene_date"], title, indexer_search.REVIEW_MAX_DAYS_ANY)
         try:
-            hit = titles_of_other_scenes(r["provider"], r["scene_stashdb_id"], r["scene_date"], names, r["studio_name"], [{"title": title}],
+            hit = far or titles_of_other_scenes(r["provider"], r["scene_stashdb_id"], r["scene_date"], names, r["studio_name"], [{"title": title}],
                                          indexer_search.own_studio_names(db, r["provider"], r["scene_stashdb_id"], r["studio_name"]))
         except Exception as e:
             logger.warning("other_scene_check: sweep of %s failed: %s", r["scene_stashdb_id"], e)
@@ -137,7 +138,8 @@ def sweep_review_candidates(db):
         if hit:
             release_repo.set_review_candidate_for_scene(db, r["provider"], r["scene_stashdb_id"], None)
             release_repo.set_search_result_for_scene(db, r["provider"], r["scene_stashdb_id"], indexer_search.RESULT_TITLE_MISMATCH_ONLY)
-            history.scene("info", "review", f"Possible match removed: {title} belongs to another scene on the stash-box (studio and date of the name)",
+            history.scene("info", "review", f"Possible match removed: {title} is dated more than a year from the scene" if far else
+                          f"Possible match removed: {title} belongs to another scene on the stash-box (studio and date of the name)",
                           r["provider"], r["scene_stashdb_id"])
             removed += 1
     return removed

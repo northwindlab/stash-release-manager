@@ -416,6 +416,9 @@ def _year_contradicts(scene_title, scene_date, candidate_title):
 
 
 _REVIEW_MAX_DAYS_SINGLE_PERFORMER = 45
+# Any review candidate (also with several performers): a release name dated more than a year from the scene is another scene or a re-release
+# (found 2026-11-14: an "Creator.25.05.31.<three performers>" release offered for a 2026-10-29 scene). Studios' dates are weeks off, not years.
+REVIEW_MAX_DAYS_ANY = 365
 
 
 def _release_date_far_off(scene_date, candidate_title, days):
@@ -1212,6 +1215,8 @@ def _select_review_candidate(releases, scene_title, scene_date, performer_names,
             continue  # e.g. "Some_Performer_-_2021" for a 2026 scene
         if _PACK_RE.search(title or ""):
             continue  # site rips / packs / collections are never one scene
+        if _release_date_far_off(scene_date, title, REVIEW_MAX_DAYS_ANY):
+            continue  # the name's own date is more than a year away from the scene's
         # "Every performer named" is strong evidence with several performers,
         # but with ONE it matches any release of that person (2026-09-28:
         # other Some Performer / Other Performer scenes offered for unrelated ones)

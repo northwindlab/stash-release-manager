@@ -6,6 +6,9 @@ Version rules (from 0.199.0 on; before, almost every change raised the MINOR num
 MINOR = a new capability a user can use, or a change that needs the user to act; MAJOR = something that worked breaks. 1.0.0 comes when the
 install guide has been proven on other machines. Documentation only gets no version.
 
+## 0.259.2
+- **Needs review: a release dated more than a year from the scene is not offered.** Case: "Break Up With Your Girlfriend" (2026-10-29) was offered "<Site>.25.05.31.<three performers>.Bridesmaids.Threesome...". The date was read correctly (2025-05-31); the date rule (within 45 days) only applied to single-performer scenes, and with several performers naming all of them was enough. Now every review candidate whose name carries a date more than 365 days from the scene's is dropped (studios' dates are weeks off, not years). The start-up sweep removes stored candidates of that kind too (History: "dated more than a year from the scene"). Sidecar only (rebuild).
+
 ## 0.259.1
 - **Other-scene check: fewer StashDB lookups.** A release that carries the scene's parent studio or site name (with the scene's own day) is now treated as our own side like the scene's studio itself: no lookup, the normal rules decide. Child-studio / parent-studio candidates are never removed by this check. Sidecar only (rebuild).
 

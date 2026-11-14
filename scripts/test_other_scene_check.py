@@ -85,5 +85,15 @@ with db.connect() as conn:
     rows = {r["scene_stashdb_id"]: dict(r) for r in conn.execute("SELECT * FROM release")}
 check("... its candidate is cleared and the result changed", rows["mine"]["review_candidate"] is None and rows["mine"]["last_search_result"] == "title_mismatch_only")
 check("... the other one stays", rows["keep"]["review_candidate"] is not None and rows["keep"]["last_search_result"] == "needs_review")
+
+# ---- a review candidate dated more than a year away (any number of performers)
+import indexer_search as ix
+far_t = "Creator.25.05.31.Elly.Clutch.Chloe.Foxxe.Jak.Knife.Bridesmaids.Threesome.XXX.1080p.MP4-P2P"
+pn = ["Elly Clutch", "Chloe Foxxe", "Jak Knife"]
+check("review: 3 performers named but dated 17 months before -> not offered",
+      ix._select_review_candidate([{"title": far_t, "age": 100}], "Break Up With Your Girlfriend", "2026-10-29", pn, []) is None)
+near_t = far_t.replace("25.05.31", "26.10.20")
+check("review: same name dated 9 days before -> still offered or plausible (not removed by the year rule)",
+      ix._release_date_far_off("2026-10-29", near_t, ix.REVIEW_MAX_DAYS_ANY) is False)
 print("FAILED: " + ", ".join(fails) if fails else "ALL OK")
 sys.exit(1 if fails else 0)
