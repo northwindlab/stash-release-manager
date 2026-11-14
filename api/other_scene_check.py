@@ -71,13 +71,15 @@ def _scenes_of(client, prefix, date):
     return scenes
 
 
-def titles_of_other_scenes(provider, scene_id, scene_date, performer_names, studio_name, releases):
+def titles_of_other_scenes(provider, scene_id, scene_date, performer_names, studio_name, releases, also_own=()):
     """The release names among `releases` that belong to another scene of the stash-box (see the module docstring)."""
     client = _get_client(provider) if _get_client and provider == "stashdb" else None
     if client is None or not hasattr(client, "find_scenes_on_date"):
         return []
     names = [compact(str(n)) for n in (performer_names or []) if len(compact(str(n))) >= 5]
     own_studio = _name_variants(studio_name)
+    for n in also_own or ():  # parent studios and site names of the scene: the same 'own' side, no lookup needed
+        own_studio |= _name_variants(n)
     out, asked = [], set()
     for r in releases or []:
         title = r.get("title") or ""
@@ -127,7 +129,8 @@ def sweep_review_candidates(db):
         if not title or not names:
             continue
         try:
-            hit = titles_of_other_scenes(r["provider"], r["scene_stashdb_id"], r["scene_date"], names, r["studio_name"], [{"title": title}])
+            hit = titles_of_other_scenes(r["provider"], r["scene_stashdb_id"], r["scene_date"], names, r["studio_name"], [{"title": title}],
+                                         indexer_search.own_studio_names(db, r["provider"], r["scene_stashdb_id"], r["studio_name"]))
         except Exception as e:
             logger.warning("other_scene_check: sweep of %s failed: %s", r["scene_stashdb_id"], e)
             continue

@@ -1355,6 +1355,12 @@ def studio_site_names(db, provider, scene_stashdb_id, *known_names):
     return out
 
 
+def own_studio_names(db, provider, scene_stashdb_id, studio_name):
+    """Parent studios and site names of the scene (what the search queries use besides the studio itself)."""
+    parents = parent_studio_names(db, provider, scene_stashdb_id, studio_name)
+    return parents + studio_site_names(db, provider, scene_stashdb_id, studio_name, parents)
+
+
 def _title_without_cast(scene_title, performer_names):
     """'Quiet student reads late' from 'Quiet student reads late - Jane Roe & John Doe': a title that
     ends in ' - <cast>' never appears like that in a release name, and the indexers AND every word of the query."""
@@ -1620,7 +1626,8 @@ def search_and_grab(db, whisparr_client, movie_id, provider, scene_stashdb_id, s
         _log()
         return _finish(RESULT_NO_CANDIDATES)
     # Release names the stash-box shows as ANOTHER scene (studio + date of the name, performer in its cast; v0.259.0) are never this scene's
-    taken_titles += other_scene_check.titles_of_other_scenes(provider, scene_stashdb_id, scene_date, performer_names, studio_name, releases)
+    taken_titles += other_scene_check.titles_of_other_scenes(provider, scene_stashdb_id, scene_date, performer_names, studio_name, releases,
+                                                        own_studio_names(db, provider, scene_stashdb_id, studio_name))
 
     allowed_resolutions = quality_profile["resolutions"] if quality_profile else []
     # Fetched once, up front, and used both here and in the review-
