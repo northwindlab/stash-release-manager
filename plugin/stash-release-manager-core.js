@@ -11,7 +11,7 @@
   // rule and the bug it caused when this drifted). Change this if you
   // install under a different folder name.
   // Must equal `version:` in stash-release-manager.yml (scripts/test_plugin_version.py checks it).
-  const PLUGIN_VERSION = '0.260.4';
+  const PLUGIN_VERSION = '0.260.5';
   const PLUGIN_ID = 'stash-release-manager';
   const PLUGIN_NAME = 'StashReleaseManager';
 
@@ -1246,6 +1246,7 @@
     no_candidates: 'no indexer results',
     title_mismatch_only: 'results found, none matched the title',
     no_quality_match: 'results found, none matched quality/VR',
+    all_blocklisted: 'results found, but all of them are on this scene\'s blocklist (or belong to another scene)',
     // 2026-09-28: one download per scene; same scene imported via another provider.
     already_downloading: 'a download for this scene is already running',
     duplicate_download: 'the same release was already sent to SABnzbd (queue or history) -- not fetched again',

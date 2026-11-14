@@ -6,6 +6,9 @@ Version rules (from 0.199.0 on; before, almost every change raised the MINOR num
 MINOR = a new capability a user can use, or a change that needs the user to act; MAJOR = something that worked breaks. 1.0.0 comes when the
 install guide has been proven on other machines. Documentation only gets no version.
 
+## 0.260.5
+- **A failed download blocks only its own release name, and "all blocklisted" is no longer called a quality problem.** Case: "Pussy Can Make You Rich" showed "results found, none matched quality/VR" although a fitting 1080p release existed. Cause: an earlier download of the same scene (`...XviD-iPT.Team`) failed in SABnzbd ("Aborted, cannot be completed"), and a failed download was put on the scene's blocklist as a plain entry, which also blocks every other encode of the release name (identity cut at "XXX") -- so all eight 1080p / 2160p results were refused as "blocklisted". Now a failed download is blocked as an exact entry (that upload failed, others may be fine), and at start-up the old entries are repaired once (idempotent): a plain entry whose History says "Download failed in ...: <title>" and that was never rejected by hand becomes an exact entry (History says so). New search result `all_blocklisted` ("results found, but all of them are on this scene's blocklist (or belong to another scene)") when every release that fits the scene was refused before, instead of "none matched quality/VR". Plugin + sidecar (rebuild, Reload plugins). Test `scripts/test_failed_blocklist.py`.
+
 ## 0.260.4
 - **"Grab anyway" also overrides the daily grab limit.** The same button now appears when a hand-picked release is refused with "the daily grab limit is reached (setting max_grabs_per_day)": after a confirmation it is sent anyway (usenet and torrent) and still counts towards the day's total. The limit itself is unchanged (Settings > max_grabs_per_day, default 30); automatic grabs keep obeying it. Plugin + sidecar (rebuild, Reload plugins).
 

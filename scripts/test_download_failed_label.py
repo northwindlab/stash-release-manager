@@ -19,7 +19,8 @@ download_failures.handle_failed(db, row, {"name": "X.26.09.12.Rosie.XXX.2160p.MP
 r = release_repo.list_releases(db, "sent_to_whisparr")[0]
 check("job removed, result says why instead of 'grabbed'", r["download_job_id"] is None and r["last_search_result"] == "download failed: Duplicate NZB")
 split = indexer_search._split_rejected(release_repo.get_review_rejected_titles(db, "stashdb", "s1"))
-check("the failed release is recognised again (also as another encode)", indexer_search._is_rejected("X.26.09.12.Rosie.XXX.1080p.MP4-GRP", split))
+check("the failed release is recognised again by its exact name (v0.260.5: another encode is NOT blocked any more)", indexer_search._is_rejected("X.26.09.12.Rosie.XXX.2160p.MP4-GRP", split)
+      and not indexer_search._is_rejected("X.26.09.12.Rosie.XXX.1080p.MP4-GRP", split))
 check("another release of the scene is not marked", not indexer_search._is_rejected("Y.26.09.12.Rosie.XXX.1080p.MP4-OTHER", split))
 print("\nALL OK" if all(res) else "\nFAILED")
 sys.exit(0 if all(res) else 1)

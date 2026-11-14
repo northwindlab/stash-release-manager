@@ -75,6 +75,7 @@ from theporndb_identify import identify_favorites_against_theporndb
 from import_check import check_import_status
 from handoff import hand_off, uses_whisparr, attempt_sidecar_search, link_imported_equivalent, feed_has_lead, refresh_scene_from_provider
 import indexer_search
+import download_failures
 import other_scene_check
 from indexer_search import search_and_grab
 import download_client_repo
@@ -2285,6 +2286,7 @@ async def lifespan(app: FastAPI):
         # One-off description backfill (2026-09-26), background, no-op once done.
         threading.Thread(target=run_details_backfill, daemon=True).start()
         threading.Thread(target=run_tags_backfill, daemon=True).start()
+        threading.Thread(target=lambda: download_failures.convert_failed_blocklists(db), daemon=True).start()  # a failed download blocks only its exact name (v0.260.5)
         threading.Thread(target=lambda: other_scene_check.sweep_review_candidates(db), daemon=True).start()  # drops stored review candidates that belong to another scene
         threading.Thread(target=convert_resume, daemon=True).start()  # Convert rows that were being checked / swapped when the sidecar stopped
         tasks += [asyncio.create_task(loop()) for loop in (

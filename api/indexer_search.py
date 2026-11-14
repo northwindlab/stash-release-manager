@@ -1279,6 +1279,7 @@ RESULT_SEARCH_BACKEND_UNAVAILABLE = "search_backend_unavailable"
 RESULT_NO_CANDIDATES = "no_candidates"
 RESULT_TITLE_MISMATCH_ONLY = "title_mismatch_only"
 RESULT_NO_QUALITY_MATCH = "no_quality_match"
+RESULT_ALL_BLOCKLISTED = "all_blocklisted"  # v0.260.5: the releases that look like the scene are all on its blocklist / held by another scene
 RESULT_NEEDS_REVIEW = "needs_review"
 RESULT_NO_DOWNLOAD_CLIENT = "no_download_client"
 RESULT_CLIENT_NOT_IMPLEMENTED = "client_not_implemented"
@@ -1706,6 +1707,11 @@ def search_and_grab(db, whisparr_client, movie_id, provider, scene_stashdb_id, s
         # different things to a user checking why nothing was grabbed.
         any_title_match = any(_candidate_plausible(scene_title, scene_date, performer_names, r.get("title")) and not predates_scene(scene_date, r)
                                for r in releases)
+        if any_title_match:
+            looks_like = [r for r in releases if _candidate_plausible(scene_title, scene_date, performer_names, r.get("title")) and not predates_scene(scene_date, r)]
+            split = _split_rejected(list(rejected_titles) + taken_titles)
+            if looks_like and all(_is_rejected(r.get("title"), split, r) for r in looks_like):
+                return _finish(RESULT_ALL_BLOCKLISTED)  # not a quality problem: every fitting release was refused before
         return _finish(RESULT_NO_QUALITY_MATCH if any_title_match else RESULT_TITLE_MISMATCH_ONLY)
 
     _log(_explain_candidates(releases, allowed_resolutions, scene_title, scene_date, performer_names,
