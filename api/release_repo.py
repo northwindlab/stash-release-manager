@@ -565,6 +565,13 @@ def list_sent_to_whisparr(db):
         return [dict(r) for r in rows]
 
 
+def set_mismatch_found_for_scene(db, provider, scene_stashdb_id, found):
+    """Stores (a dict) or clears (None) which scene a mismatching file really is, see db._migrate_release_mismatch_found()."""
+    with db.connect() as conn:
+        conn.execute("UPDATE release SET mismatch_found = ? WHERE provider = ? AND scene_stashdb_id = ?",
+                     (json.dumps(found) if found else None, provider, scene_stashdb_id))
+
+
 def set_import_error_for_scene(db, provider, scene_stashdb_id, code, detail):
     """Records why an import attempt failed (2026-09-23) -- scene-scoped
     like set_status_for_scene()/set_download_job_for_scene() above.

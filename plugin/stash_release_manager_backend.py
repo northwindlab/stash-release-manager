@@ -147,6 +147,10 @@ def main():
     elif mode == "releases_confirm_file":
         result = _post(sidecar_url, f"/releases/{args.get('provider')}/{args.get('scene_stashdb_id')}/confirm-file",
                        {"submit": bool(args.get("submit"))}, timeout=180)
+    elif mode == "releases_identify_file":
+        result = _post(sidecar_url, f"/releases/{args.get('provider')}/{args.get('scene_stashdb_id')}/identify-file", {}, timeout=180)
+    elif mode == "releases_place_file":
+        result = _post(sidecar_url, f"/releases/{args.get('provider')}/{args.get('scene_stashdb_id')}/place-file", {}, timeout=600)
     elif mode == "releases_recheck_fingerprints":
         result = _post(sidecar_url, f"/releases/{args.get('provider')}/{args.get('scene_stashdb_id')}/recheck-fingerprints", {}, timeout=180)
     elif mode == "films_list":

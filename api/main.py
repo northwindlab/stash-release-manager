@@ -746,6 +746,14 @@ def _organizer():
     return library_organize.Organizer(db, get_stash_client(), _stashdb_or_none(), theporndb_client,
                                       _stash_path_to_local, setting, get_whisparr_client=get_whisparr_client,
                                       extra_providers=_extra_stashboxes())
+def _organize_scene(scene_id):
+    """Renames / moves ONE tagged scene to the naming scheme (fingerprint-verified plan of library_organize), for file_importer.place_file_for_other_scene()."""
+    plan = _organizer().plan(None, scene_id=scene_id)
+    items = plan["rename"] + plan["move"]
+    result = _organizer()._organize_items(items, plan["studio"]) if items else {"done": [], "failed": []}
+    result["not_organized"] = [{"path": i["path"], "reason": i.get("reason") or i.get("check")} for i in plan["needs_check"] + plan["conflict"] + plan["multi_file"]]
+    return result
+
 def _importer():
     """Maintenance > Import folder (2026-09-29, library_import.py)."""
     def setting(key):
@@ -788,6 +796,7 @@ def _after_import(scene_id, new_path=None):
 
 
 _file_importer_module.after_import_hook = _after_import
+_file_importer_module.organize_scene_hook = _organize_scene
 # Upgrade downloads retire the file they replace (upgrades.on_upgrade_imported()).
 _file_importer_module.upgrade_import_hook = lambda provider, stash_id, path, verified: upgrades.on_upgrade_imported(
     db, get_stash_client(), _stash_path_to_local, _recycle_library_file, provider, stash_id, path, verified,

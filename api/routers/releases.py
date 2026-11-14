@@ -679,6 +679,26 @@ def confirm_file(provider: str, scene_stashdb_id: str, body: dict = None):
     return result
 
 
+@router.post("/{provider}/{scene_stashdb_id}/identify-file")
+def identify_file(provider: str, scene_stashdb_id: str):
+    """"Which scene is it?" on an Import-failed row -- see file_importer.identify_failed_import()."""
+    result = file_importer.identify_failed_import(_db, _get_stash_client(), _get_stashdb_client(), provider, scene_stashdb_id,
+                                                  get_provider_client=_get_provider_client)
+    if result.get("error"):
+        raise HTTPException(400, result["error"])
+    return result
+
+
+@router.post("/{provider}/{scene_stashdb_id}/place-file")
+def place_file(provider: str, scene_stashdb_id: str):
+    """"Use for the other scene" on an Import-failed row -- see file_importer.place_file_for_other_scene()."""
+    result = file_importer.place_file_for_other_scene(_db, _get_stash_client(), _get_stashdb_client(), provider, scene_stashdb_id,
+                                                      get_provider_client=_get_provider_client)
+    if result.get("error"):
+        raise HTTPException(400, result["error"])
+    return result
+
+
 @router.post("/{provider}/{scene_stashdb_id}/recheck-fingerprints")
 def recheck_fingerprints(provider: str, scene_stashdb_id: str):
     """"Re-check fingerprints" on an Import-failed row: asks the provider again, imports on an exact match, otherwise only reports what it found

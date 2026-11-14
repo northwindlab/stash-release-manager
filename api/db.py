@@ -571,6 +571,7 @@ class Database:
         self._migrate_release_pending_import_path(conn)
         self._migrate_provider_check_constraint(conn)
         self._migrate_release_import_error(conn)
+        self._migrate_release_mismatch_found(conn)
         self._migrate_release_search_details(conn)
         self._migrate_release_scene_urls(conn)
         self._migrate_release_details(conn)
@@ -1116,6 +1117,13 @@ class Database:
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(release)").fetchall()}
         if "scene_urls" not in cols:
             conn.execute("ALTER TABLE release ADD COLUMN scene_urls TEXT")
+
+    def _migrate_release_mismatch_found(self, conn):
+        """`release.mismatch_found` (v0.260.0): JSON {"id", "title", "list"} -- which provider scene a wrongly downloaded file really is (found at the
+        fingerprint mismatch; "list" = 'wishlist' / 'upgrade' / null: whether we are looking for that scene)."""
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(release)").fetchall()}
+        if "mismatch_found" not in cols:
+            conn.execute("ALTER TABLE release ADD COLUMN mismatch_found TEXT")
 
     def _migrate_release_import_error(self, conn):
         """Adds `release.import_error_code`/`import_error_detail`
