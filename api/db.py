@@ -589,6 +589,7 @@ class Database:
         self._migrate_provider_check_constraint(conn)
         self._migrate_release_import_error(conn)
         self._migrate_release_mismatch_found(conn)
+        self._migrate_grab_info(conn)
         self._migrate_release_search_details(conn)
         self._migrate_release_scene_urls(conn)
         self._migrate_release_details(conn)
@@ -1134,6 +1135,20 @@ class Database:
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(release)").fetchall()}
         if "scene_urls" not in cols:
             conn.execute("ALTER TABLE release ADD COLUMN scene_urls TEXT")
+
+    def _migrate_grab_info(self, conn):
+        """v0.260.2: table `grab_info` = the last grabbed candidate of a scene as JSON (indexer, protocol, download / info URL, size, torrent extras),
+        and the same fields on `known_release` -- so a known release can be fetched again without asking an indexer. The URLs can carry the indexer's
+        API key: a table of its own (the release rows go to the browser as they are), never in logs or the UI."""
+        conn.execute("""CREATE TABLE IF NOT EXISTS grab_info (
+            provider TEXT NOT NULL, scene_id TEXT NOT NULL, info TEXT, updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            PRIMARY KEY (provider, scene_id))""")
+        cols = {r["name"] for r in conn.execute("PRAGMA table_info(known_release)").fetchall()}
+        for col in ("indexer", "protocol", "download_url", "info_url", "grab_info"):
+            if col not in cols:
+                conn.execute(f"ALTER TABLE known_release ADD COLUMN {col} TEXT")
+        if "release_size" not in cols:
+            conn.execute("ALTER TABLE known_release ADD COLUMN release_size INTEGER")
 
     def _migrate_release_mismatch_found(self, conn):
         """`release.mismatch_found` (v0.260.0): JSON {"id", "title", "list"} -- which provider scene a wrongly downloaded file really is (found at the

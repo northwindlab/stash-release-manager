@@ -1913,6 +1913,7 @@ def grab_candidate(db, provider, scene_stashdb_id, candidate, replace_job=False)
 
     release_repo.set_download_job_for_scene(db, provider, scene_stashdb_id, client_row["id"], nzo_id)
     release_repo.set_grabbed_for_scene(db, provider, scene_stashdb_id, candidate.get("title"))
+    release_repo.set_grabbed_info_for_scene(db, provider, scene_stashdb_id, candidate)
     release_repo.set_review_candidate_for_scene(db, provider, scene_stashdb_id, None)
     logger.info("indexer_search: grabbed %r from %s -> %s job %s",
                 candidate.get("title"), candidate.get("indexer"), client_row["name"], nzo_id)

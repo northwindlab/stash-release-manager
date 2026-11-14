@@ -618,6 +618,22 @@ def set_grabbed_for_scene(db, provider, scene_stashdb_id, title):
         )
 
 
+def set_grabbed_info_for_scene(db, provider, scene_stashdb_id, candidate):
+    """The grabbed candidate (indexer, protocol, URLs, size, ...), see db._migrate_grab_info(); a table of its own because the URL carries an API key."""
+    with db.connect() as conn:
+        conn.execute("INSERT OR REPLACE INTO grab_info (provider, scene_id, info, updated_at) VALUES (?, ?, ?, datetime('now'))",
+                     (provider, scene_stashdb_id, json.dumps(candidate) if candidate else None))
+
+
+def get_grabbed_info_for_scene(db, provider, scene_stashdb_id):
+    with db.connect() as conn:
+        row = conn.execute("SELECT info FROM grab_info WHERE provider = ? AND scene_id = ?", (provider, scene_stashdb_id)).fetchone()
+    try:
+        return json.loads(row["info"]) if row and row["info"] else None
+    except ValueError:
+        return None
+
+
 def scene_has_active_download(db, provider, scene_stashdb_id):
     """True while a download for this scene is running or waiting for its
     import (on the wishlist WITH a download job) -- see indexer_search's

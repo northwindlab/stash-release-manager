@@ -6,6 +6,9 @@ Version rules (from 0.199.0 on; before, almost every change raised the MINOR num
 MINOR = a new capability a user can use, or a change that needs the user to act; MAJOR = something that worked breaks. 1.0.0 comes when the
 install guide has been proven on other machines. Documentation only gets no version.
 
+## 0.260.2
+- **Known releases also keep how they were fetched.** Every grab now records the candidate (indexer, protocol, download / info URL, size, torrent extras) in a table of its own (`grab_info`; the URL can carry an indexer API key, so it is not a column of the release rows that go to the browser). When a release is added to `known_release` (verified import, or a mismatch that identifies another scene) the indexer, protocol, URLs and release size are stored with it. Still only collected; nothing reads it yet. Releases grabbed before this version have no such data. Sidecar only (rebuild).
+
 ## 0.260.1
 - **Known releases are collected (nothing reads them yet).** New table `known_release`: release name + oshash / phash / md5 / length / size of the file + the scene it belongs to. Written at a verified import (the downloaded release is that scene's) and when a fingerprint mismatch finds that the wrong file is another scene (the wrong release is THAT scene's, also when we are not looking for it). Base for "do we already know a release of this scene?" before an indexer is asked. Collecting never fails an import. Sidecar only (rebuild).
 

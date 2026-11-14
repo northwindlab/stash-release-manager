@@ -35,6 +35,7 @@ class Provider:
         self.calls.append(sets)
         return [self.matches]
 
+release_repo.set_grabbed_info_for_scene(db, "stashdb", "A", {"title": "Wrong.Release.1080p", "indexer": "Idx", "protocol": "usenet", "downloadUrl": "http://i/get?apikey=SECRET", "infoUrl": "http://i/d", "size": 123})
 p = Provider([{"id": "A", "title": "Scene A"}, {"id": "C", "title": "Scene C"}, {"id": "B", "title": "Scene B"}])
 found = fi.identify_wrong_file(db, Stash(), p, "stashdb", "A", PATH)
 check("the scene we are looking for is preferred, the scene itself is skipped", found == {"id": "B", "title": "Scene B", "list": "wishlist"})
@@ -49,6 +50,8 @@ kr = known_release.for_scene(db, "stashdb", "B")
 check("the wrong file is collected as a known release of the scene it is", len(kr) == 1 and kr[0]["release_title"] == "Wrong.Release.1080p"
       and kr[0]["oshash"] == "ab" and kr[0]["phash"] == "cd" and kr[0]["source"] == "mismatch")
 fi.identify_wrong_file(db, Stash(), p, "stashdb", "A", PATH)
+check("how it was fetched is kept too (indexer, URL, size)", kr[0]["indexer"] == "Idx" and kr[0]["download_url"].endswith("SECRET") and kr[0]["release_size"] == 123 and kr[0]["protocol"] == "usenet")
+check("the grab info is not a column of the release rows (they go to the browser)", all("SECRET" not in str(v) for v in release_repo.list_rows_for_scene(db, "stashdb", "A")[0].values()))
 check("asking again does not duplicate it", len(known_release.for_scene(db, "stashdb", "B")) == 1)
 check("nothing is collected without a release name", known_release.record(db, Stash(), "stashdb", "B", PATH, None, "import") is False)
 
