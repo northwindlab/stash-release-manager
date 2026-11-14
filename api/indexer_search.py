@@ -75,6 +75,7 @@ from urllib.parse import quote
 import download_client_repo
 import download_history_cleanup
 import history
+import other_scene_check
 import release_repo
 import torrent_estimate
 from qbittorrent_client import AlreadyAdded, QbittorrentClient, QbittorrentError
@@ -1618,6 +1619,8 @@ def search_and_grab(db, whisparr_client, movie_id, provider, scene_stashdb_id, s
     if not releases:
         _log()
         return _finish(RESULT_NO_CANDIDATES)
+    # Release names the stash-box shows as ANOTHER scene (studio + date of the name, performer in its cast; v0.259.0) are never this scene's
+    taken_titles += other_scene_check.titles_of_other_scenes(provider, scene_stashdb_id, scene_date, performer_names, studio_name, releases)
 
     allowed_resolutions = quality_profile["resolutions"] if quality_profile else []
     # Fetched once, up front, and used both here and in the review-

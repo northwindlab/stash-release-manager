@@ -6,6 +6,10 @@ Version rules (from 0.199.0 on; before, almost every change raised the MINOR num
 MINOR = a new capability a user can use, or a change that needs the user to act; MAJOR = something that worked breaks. 1.0.0 comes when the
 install guide has been proven on other machines. Documentation only gets no version.
 
+## 0.259.0
+- **Releases that belong to another scene are no longer offered (Needs review) or grabbed.** Case: the scene "Tight and Fresh Anal Newbie" (another studio, 2013-01-25, one performer) was offered "MyDadsHotGirlfriend.13.02.08.<Performer>.XXX.1080p": it names the performer and the date is only 14 days away, but StashDB has a scene of that studio dated exactly 2013-02-08 with this performer in the cast -- the release is that scene. New check (`api/other_scene_check.py`): a release name that carries a studio and a date and names one of the scene's performers is looked up on StashDB (studio search by the name's spelling, then the studio's scenes of that day); when one of them is not our scene and one of its cast is named in the release, the name counts as "belongs to another scene" (verdict `other_scene` in the search log, same list as the names other scenes already hold). Our own studio and day are left to the normal rules; a failed or empty lookup never removes a candidate; every studio + day is asked once per 6 h (at most 8 pairs per search). StashDB only.
+- **The stored Needs-review candidates are cleaned once at start-up** with the same check (the scene's search result becomes "title mismatch only", the History says why). Upgrade candidates are not swept. New `StashDBClient.find_scenes_on_date`, test `scripts/test_other_scene_check.py`. The sidecar needs a rebuild.
+
 ## 0.258.9
 - **Userscript: "dismissed" has its own colour.** A scene dismissed in StashReleaseManager showed the same grey as a scene the sidecar does not know at all. Dismissed is amber now (bar border, chip dot, tooltip unchanged); grey / no colour still means "not known". The script version is 0.258.9 (the sidecar serves it from the image: rebuild, then update the script in Violentmonkey).
 

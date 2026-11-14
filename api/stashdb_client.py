@@ -821,6 +821,18 @@ class StashDBClient:
             p["image_url"] = (p.pop("images", None) or [{}])[0].get("url")
         return {"total": wrapper["count"], "results": results}
 
+    def find_scenes_on_date(self, studio_id, date):
+        """The scenes of one studio dated exactly `date` (YYYY-MM-DD), with their cast: [{"id", "title", "date", "studio", "performers"}]
+        (other_scene_check.py: which scene does a release name with studio + date belong to)."""
+        variables = {"input": {"studios": {"value": [studio_id], "modifier": "INCLUDES"}, "date": {"value": date, "modifier": "EQUALS"},
+                               "page": 1, "per_page": 40}}
+        resp = self._post({"query": QUERY_SCENES, "variables": variables})
+        resp.raise_for_status()
+        data = resp.json()
+        if data.get("errors"):
+            raise RuntimeError(str(data["errors"]))
+        return data["data"]["queryScenes"]["scenes"]
+
     def get_studio_name(self, studio_id):
         """The studio's name on this stash-box, or None (2026-09-28: StashDB's
         spelling wins for file/folder names, see file_importer)."""
