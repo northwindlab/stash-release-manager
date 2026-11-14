@@ -11,7 +11,7 @@
   // rule and the bug it caused when this drifted). Change this if you
   // install under a different folder name.
   // Must equal `version:` in stash-release-manager.yml (scripts/test_plugin_version.py checks it).
-  const PLUGIN_VERSION = '0.260.2';
+  const PLUGIN_VERSION = '0.260.3';
   const PLUGIN_ID = 'stash-release-manager';
   const PLUGIN_NAME = 'StashReleaseManager';
 
@@ -2286,14 +2286,14 @@
           : (candidate.est_resolution ? `~${candidate.est_resolution}p (estimated)` : 'unknown quality'));
         const rowStatus = el('span', { className: 'srw-key-status' });
         // One grab button: `grab` = the caller's own grab (null = the default grab of this panel), `ask` = the confirm text
-        const grabButton = (label, className, grab, ask, hint) => el('button', {
+        const grabButton = (label, className, grab, ask, hint, force = false) => el('button', {
           className, textContent: label, title: hint || '',
           onClick: (e) => {
             confirmInline(e.currentTarget, candidate.tried ? `${ask} (Note: ${candidate.tried}.)` : ask, async () => {
               rowStatus.textContent = ' starting...';
               try {
-                const result = grab ? await grab(candidate) : (opts && opts.grab ? await opts.grab(candidate) : await runOp('releases_manual_search_grab', {
-                  provider: r.provider, scene_stashdb_id: r.scene_stashdb_id, candidate,
+                const result = grab ? await grab(candidate, force) : (opts && opts.grab ? await opts.grab(candidate, force) : await runOp('releases_manual_search_grab', {
+                  provider: r.provider, scene_stashdb_id: r.scene_stashdb_id, candidate, force,
                 }));
                 if (result.error) {
                   rowStatus.textContent = ` error: ${result.error}`;
@@ -2301,7 +2301,13 @@
                   return;
                 }
                 if (result.result && !result.grab) { // the sidecar did not send it (e.g. another download of the scene is running)
-                  rowStatus.textContent = ` not grabbed: ${String(result.result).replace(/_/g, ' ')}`;
+                  rowStatus.textContent = ` not grabbed: ${SEARCH_RESULT_LABEL[result.result] || String(result.result).replace(/_/g, ' ')}`;
+                  // v0.260.3: the refusal can be overridden by hand (the same release was in SABnzbd's history / failed / was blocklisted before)
+                  if (result.result === 'duplicate_download' && !force && (!opts || !opts.grab || opts.forceGrab)) {
+                    rowStatus.append(' ', grabButton('Grab anyway', 'srw-btn', null,
+                      `Fetch "${candidate.title}" again although it was downloaded or refused before? It leaves this scene's blocklist and its old SABnzbd entries are cleared.`,
+                      'Overrides the duplicate protection for this one release', true));
+                  }
                   return;
                 }
                 rowStatus.textContent = ' grabbed';

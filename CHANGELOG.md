@@ -6,6 +6,9 @@ Version rules (from 0.199.0 on; before, almost every change raised the MINOR num
 MINOR = a new capability a user can use, or a change that needs the user to act; MAJOR = something that worked breaks. 1.0.0 comes when the
 install guide has been proven on other machines. Documentation only gets no version.
 
+## 0.260.3
+- **"Grab anyway" overrides the duplicate protection.** A release picked by hand in the manual search was refused ("not grabbed: duplicate download") when SABnzbd had it in its history or Archive, it had failed twice, or this program had downloaded it before -- e.g. a release marked as wrong by mistake. The refusal now says why (the text of the Releases list) and offers a **Grab anyway** button: after a confirmation the release leaves the scene's blocklist, its earlier SABnzbd history / Archive entries are removed (so SABnzbd's own "Duplicate NZB" check does not fail it again) and it is sent. A release that is in the SABnzbd queue right now is still refused. Also on the Stuck torrent search. Plugin + sidecar (rebuild, Reload plugins). Test `scripts/test_force_grab.py`.
+
 ## 0.260.2
 - **Known releases also keep how they were fetched.** Every grab now records the candidate (indexer, protocol, download / info URL, size, torrent extras) in a table of its own (`grab_info`; the URL can carry an indexer API key, so it is not a column of the release rows that go to the browser). When a release is added to `known_release` (verified import, or a mismatch that identifies another scene) the indexer, protocol, URLs and release size are stored with it. Still only collected; nothing reads it yet. Releases grabbed before this version have no such data. Sidecar only (rebuild).
 

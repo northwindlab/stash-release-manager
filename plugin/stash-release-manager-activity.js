@@ -348,7 +348,8 @@
           const scn = { provider: row.provider, scene_stashdb_id: row.scene_id, title: row.title };
           buttons.push(window.SRW.buildManualSearch(scn, sources, caps.backend, refresh, {
             host: () => li,
-            grab: (candidate) => window.SRW.runOp('releases_manual_search_grab', { provider: row.provider, scene_stashdb_id: row.scene_id, candidate, replace: true }),
+            forceGrab: true,
+            grab: (candidate, force) => window.SRW.runOp('releases_manual_search_grab', { provider: row.provider, scene_stashdb_id: row.scene_id, candidate, replace: true, force: Boolean(force) }),
           }));
         }
       }

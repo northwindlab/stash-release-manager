@@ -1728,11 +1728,27 @@ def _norm_release(name):
     return re.sub(r"[^a-z0-9]+", "", (name or "").lower())
 
 
-def _duplicate_guard(client, title, db=None):
+def _forget_in_sabnzbd(client, title):
+    """For a forced grab: removes the finished / failed entries of the same release from SABnzbd's history and Archive, so its own duplicate detection
+    ("Duplicate NZB") does not fail the NZB again. Queue entries are never touched. Best-effort."""
+    key = _norm_release(title)
+    try:
+        for s in client.get_history(limit=1000):
+            if _norm_release(s.get("name")) == key and s.get("nzo_id"):
+                client.delete_history(s["nzo_id"])
+        for s in client.get_archive():
+            if _norm_release(s.get("name")) == key and s.get("nzo_id"):
+                client.delete_archived(s["nzo_id"])
+    except Exception:
+        logger.exception("indexer_search: couldn't clear the earlier SABnzbd entries of %r before a forced grab", title)
+
+
+def _duplicate_guard(client, title, db=None, force=False):
     """Why this release must NOT be sent to SABnzbd again (or None). 2026-09-29: an error made the same five
     releases be fetched ~21 times each (97 NZB downloads, the indexer complained). SABnzbd's own duplicate
     detection only sees the NZB AFTER the indexer served it, so the check has to happen before the call.
-    Queued or already downloaded -> never again; failed twice -> not a third time. Fails closed."""
+    Queued or already downloaded -> never again; failed twice -> not a third time. Fails closed.
+    `force` (v0.260.3, the user's explicit "Grab anyway"): only the QUEUE check stays -- history, failed twice and the ledger no longer refuse."""
     key = _norm_release(title)
     if not key:
         return None
@@ -1744,6 +1760,8 @@ def _duplicate_guard(client, title, db=None):
         return "couldn't check SABnzbd's queue/history for duplicates"
     if any(_norm_release(s.get("filename")) == key for s in queued):
         return "the same release is already in the SABnzbd queue"
+    if force:
+        return None
     failed = 0
     for s in history_rows:
         if _norm_release(s.get("name")) == key:
@@ -1814,7 +1832,7 @@ def _grab_counted(db):
                         ON CONFLICT (key) DO UPDATE SET value = excluded.value""", (f"{today}:{n + 1}",))
 
 
-def send_to_download_client(db, candidate, warn):
+def send_to_download_client(db, candidate, warn, force=False):
     """The shared half of every grab (scene or film): picks the download client, runs the duplicate guard and the daily cap, adds the
     NZB. `warn(message)` records a skipped grab for the caller's own History. Returns {"result": RESULT_*, "client_row", "nzo_id"}
     -- RESULT_GRABBED when the job was added."""
@@ -1830,7 +1848,7 @@ def send_to_download_client(db, candidate, warn):
         return {"result": RESULT_CLIENT_NOT_IMPLEMENTED}
 
     client = SabnzbdClient(client_row["url"], client_row["api_key"])
-    reason = _duplicate_guard(client, candidate.get("title"), db)
+    reason = _duplicate_guard(client, candidate.get("title"), db, force=force)
     if reason:
         logger.warning("indexer_search: not grabbing %r -- %s", candidate.get("title"), reason)
         warn(f"Grab skipped: {reason}")
@@ -1840,6 +1858,8 @@ def send_to_download_client(db, candidate, warn):
         logger.warning("indexer_search: daily grab cap reached (%s/%s) -- not grabbing %r", used, cap, candidate.get("title"))
         warn(f"Grab skipped: daily grab cap reached ({used}/{cap}; setting max_grabs_per_day)")
         return {"result": RESULT_DAILY_CAP}
+    if force:
+        _forget_in_sabnzbd(client, candidate.get("title"))
     nzo_ids = client.add_url(candidate["downloadUrl"], category=client_row["category"] or None)
     _grab_counted(db)
     nzo_id = nzo_ids[0] if nzo_ids else None
@@ -1882,7 +1902,7 @@ def _send_to_qbittorrent(db, candidate, client_row, warn):
     return {"result": RESULT_GRABBED, "client_row": client_row, "nzo_id": info_hash}
 
 
-def grab_candidate(db, provider, scene_stashdb_id, candidate, replace_job=False):
+def grab_candidate(db, provider, scene_stashdb_id, candidate, replace_job=False, force=False):
     """Sends `candidate` (a dict with at least title/protocol/downloadUrl/
     indexer -- the same shape `_select_best()`/`_select_review_candidate()`
     produce) to this scene's configured download client and records the
@@ -1892,7 +1912,9 @@ def grab_candidate(db, provider, scene_stashdb_id, candidate, replace_job=False)
     accept_review_candidate()) shares the exact same grab path a normal
     auto-accepted candidate uses, instead of a second, drifting copy.
     `replace_job` (v0.231.0): the scene's running download is being replaced (a dead torrent), so it does not stop the grab; the caller
-    removes the old download."""
+    removes the old download.
+    `force` (v0.260.3): the user's explicit "Grab anyway" -- the duplicate guard no longer refuses a release that was in SABnzbd's history / failed
+    before, and the release leaves this scene's blocklist (it is wanted again)."""
     def _finish(result, grab=None):
         release_repo.set_search_result_for_scene(db, provider, scene_stashdb_id, result)
         return {"result": result, "grab": grab}
@@ -1906,11 +1928,15 @@ def grab_candidate(db, provider, scene_stashdb_id, candidate, replace_job=False)
 
     sent = send_to_download_client(
         db, candidate, lambda msg: history.scene("warning", "grab", msg, provider, scene_stashdb_id,
-                                                 details={"release": candidate.get("title")}))
+                                                 details={"release": candidate.get("title")}), force=force)
     if sent["result"] != RESULT_GRABBED:
         return _finish(sent["result"])
     client_row, nzo_id = sent["client_row"], sent["nzo_id"]
 
+    if force and candidate.get("title"):
+        release_repo.remove_review_rejected_title(db, provider, scene_stashdb_id, candidate["title"])
+        release_repo.remove_review_rejected_title(db, provider, scene_stashdb_id, EXACT_PREFIX + candidate["title"])
+        history.scene("info", "blocklist", f"Grabbed anyway, off the blocklist: {candidate['title']}", provider, scene_stashdb_id)
     release_repo.set_download_job_for_scene(db, provider, scene_stashdb_id, client_row["id"], nzo_id)
     release_repo.set_grabbed_for_scene(db, provider, scene_stashdb_id, candidate.get("title"))
     release_repo.set_grabbed_info_for_scene(db, provider, scene_stashdb_id, candidate)

@@ -502,7 +502,7 @@ def manual_search_grab(provider: str, scene_stashdb_id: str, body: dict):
         raise HTTPException(400, "candidate.downloadUrl is required")
     # "replace": the flagged torrent of this scene is replaced by the picked one (v0.231.0); only when the monitor knows such a torrent
     old = torrent_health.row_for_scene(_db, provider, scene_stashdb_id) if body.get("replace") else None
-    result = grab_candidate(_db, provider, scene_stashdb_id, candidate, replace_job=old is not None)
+    result = grab_candidate(_db, provider, scene_stashdb_id, candidate, replace_job=old is not None, force=bool(body.get("force")))
     if result.get("grab"):
         history.scene("info", "grab", f"Picked by hand from the manual search: {candidate.get('title')}",
                       provider, scene_stashdb_id)

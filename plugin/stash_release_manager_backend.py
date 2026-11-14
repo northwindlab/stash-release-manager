@@ -832,7 +832,7 @@ def main():
         # Same generous timeout class as releases_handoff -- a real
         # download-client add round trip.
         path = f"/releases/{args.get('provider')}/{args.get('scene_stashdb_id')}/manual-search/grab"
-        result = _post(sidecar_url, path, {"candidate": args.get("candidate") or {}, "replace": bool(args.get("replace"))}, timeout=60)
+        result = _post(sidecar_url, path, {"candidate": args.get("candidate") or {}, "replace": bool(args.get("replace")), "force": bool(args.get("force"))}, timeout=60)
     elif mode == "releases_last_search_grab":
         # Re-finds a result of the search log by title + indexer + size and grabs it (replacing a running torrent), v0.231.3
         path = f"/releases/{args.get('provider')}/{args.get('scene_stashdb_id')}/last-search/grab"
