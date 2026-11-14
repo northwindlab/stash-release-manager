@@ -6,6 +6,9 @@ Version rules (from 0.199.0 on; before, almost every change raised the MINOR num
 MINOR = a new capability a user can use, or a change that needs the user to act; MAJOR = something that worked breaks. 1.0.0 comes when the
 install guide has been proven on other machines. Documentation only gets no version.
 
+## 0.260.9
+- **Needs review: a release of an unrelated studio is not offered.** The studio a release name starts with (the longest run of 1-4 leading words that is exactly a stash-box studio name) must be the scene's own studio, its parent or site, or a studio with the same parent; otherwise the candidate is set aside and the next best is chosen (stored candidates get the same check at start-up). Never decided, the candidate stays: names starting with a platform name (new setting `studio_platform_names`, a short default list, for all scenes), with a studio the stash-box does not know, or with one of the scene's performers; also failed lookups. Only the Needs-review choice, not the automatic grab. Switch `studio_gate_enabled`. Plugin + sidecar (rebuild, Reload plugins).
+
 ## 0.260.8
 - **Needs review: an undated release name that is another scene's title is not offered.** The other-scene check only knew release names with a studio prefix and a date. Now a name without a date is checked by its title: the words left after the performers / studio and the quality tail are searched on the stash-box; when another scene (not the wanted one) has exactly that title and one of its performers or its studio is named in the release, the release counts as that scene's and is not offered (also removed from stored Needs-review candidates at start-up). A name containing the wanted scene's own title is never touched, a failing lookup keeps the candidate. Sidecar (rebuild).
 

@@ -852,7 +852,7 @@ class StashDBClient:
         search_performers()/search_scenes() above)."""
         resp = self._post({
             "query": "query($term: String!, $limit: Int!) { searchStudio(term: $term, limit: $limit) "
-                      "{ id name is_favorite images { url } } }",
+                      "{ id name is_favorite parent { id name } images { url } } }",
             "variables": {"term": term, "limit": limit},
         })
         resp.raise_for_status()

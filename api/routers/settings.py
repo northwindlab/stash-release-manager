@@ -404,6 +404,9 @@ DEFAULTS = {
     "upgrade_search_interval_hours": "12",
     # Hard cap on NZB grabs per day of ANY kind (2026-09-29, after a loop bug hammered the indexer).
     "max_grabs_per_day": "30",
+    # Needs review: a release of a studio unrelated to the scene's studio is not offered (v0.260.9, studio_gate.py); the platform names are never judged.
+    "studio_gate_enabled": "true",
+    "studio_platform_names": "Creator, OF, Fansly, ManyVids, AnalVids, Anal Vids, Pornbox",
     # Colour of the built-in providers in lists, badges and the calendar (#rrggbb, empty = default) -- v0.152.0.
     # Stage B of Whisparr for movies (v0.158.0): after a movie import tell Whisparr the folder + rescan, automatically. Off until the dry run was seen.
     "film_whisparr_file_auto": "false",
@@ -701,6 +704,8 @@ def set_one(key: str, body: dict):
         raise HTTPException(400, f"search_backend must be one of {SEARCH_BACKENDS}, got {value!r}")
     if key == "fallback_resolution_days" and not (value.isdigit() and 0 <= int(value) <= 365):
         raise HTTPException(400, f"fallback_resolution_days must be a whole number of days between 0 and 365, got {value!r}")
+    if key == "studio_gate_enabled" and value not in ("true", "false"):
+        raise HTTPException(400, f"studio_gate_enabled must be 'true' or 'false', got {value!r}")
     if key == "fallback_accept_sd" and value not in ("true", "false"):
         raise HTTPException(400, f"fallback_accept_sd must be 'true' or 'false', got {value!r}")
     if key == "transcode_quality" and not (value.isdigit() and 16 <= int(value) <= 32):

@@ -206,6 +206,17 @@
       label: 'Maximum grabs per day (all kinds)', key: 'max_grabs_per_day', value: settings.max_grabs_per_day || '30', min: '1', max: '1000', step: '1',
       hint: 'Hard cap on downloads this sidecar starts per day, whatever triggers them. Protects the indexer account against a runaway loop.',
     });
+    appendSettingRow(searchBackendSection, {
+      label: 'Needs review: set aside releases of an unrelated studio', key: 'studio_gate_enabled', value: settings.studio_gate_enabled === 'false' ? 'false' : 'true',
+      options: [['true', 'On'], ['false', 'Off']],
+      hint: 'A possible match whose name starts with a studio the stash-box knows, but that is neither the scene\'s studio, its parent / site nor a studio with the same parent, is not offered. '
+        + 'Names that start with an unknown studio, one of the scene\'s performers or one of the platform names below are still shown.',
+    });
+    appendSettingRow(searchBackendSection, {
+      label: 'Platform names (never judged as a different studio)', key: 'studio_platform_names', text: true,
+      value: settings.studio_platform_names || 'Creator, OF, Fansly, ManyVids, AnalVids, Anal Vids, Pornbox',
+      hint: 'Comma-separated. Creators and resold content are often filed under another name than the release carries; a name starting with one of these is always shown.',
+    });
     panels.search_quality.appendChild(searchBackendSection);
     panels.search_quality.appendChild(await buildIndexersSection());
     panels.search_quality.appendChild(await buildQualityProfilesSection(settings));
@@ -2844,11 +2855,11 @@
     section.appendChild(status);
   }
 
-  function appendSettingRow(section, { label, key, value, hint, min, max, step, options }) {
+  function appendSettingRow(section, { label, key, value, hint, min, max, step, options, text }) {
     const { el } = window.SRW;
     const control = options
       ? el('select', {}, options.map(([v, text]) => el('option', { value: v, textContent: text })))
-      : el('input', { type: 'number', min, max, step });
+      : text ? el('input', { type: 'text', style: 'width: 28rem' }) : el('input', { type: 'number', min, max, step });
     control.value = value;
     const status = el('span', { className: 'srw-key-status' });
     section.appendChild(el('label', {}, [`${label}: `, control]));

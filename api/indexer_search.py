@@ -76,6 +76,7 @@ import download_client_repo
 import download_history_cleanup
 import history
 import other_scene_check
+import studio_gate
 import release_repo
 import torrent_estimate
 from qbittorrent_client import AlreadyAdded, QbittorrentClient, QbittorrentError
@@ -1686,12 +1687,26 @@ def search_and_grab(db, whisparr_client, movie_id, provider, scene_stashdb_id, s
         review_resolutions = list(allowed_resolutions)
         if not is_vr and candidate_filter is None:
             review_resolutions += [r for r in fallback_resolutions(db, scene_date) if r not in review_resolutions]
-        review_candidate = _select_review_candidate(releases, scene_title, scene_date, performer_names,
-                                                      list(rejected_titles) + taken_titles, is_vr=is_vr,
-                                                      size_limits=size_limits, vr_rules=vr_rules,
-                                                      allowed_resolutions=review_resolutions,
-                                                      allow_unknown_resolution=allow_unknown_resolution,
-                                                      studio_name=studio_name)
+        # A candidate of a studio unconnected to ours (studio_gate.py, v0.260.9) is set aside and the next best one is chosen; only the offered
+        # candidates are looked at, so this costs a few stash-box requests at most.
+        unrelated, own_names = [], None
+        for _ in range(6):
+            review_candidate = _select_review_candidate(releases, scene_title, scene_date, performer_names,
+                                                          list(rejected_titles) + taken_titles + unrelated, is_vr=is_vr,
+                                                          size_limits=size_limits, vr_rules=vr_rules,
+                                                          allowed_resolutions=review_resolutions,
+                                                          allow_unknown_resolution=allow_unknown_resolution,
+                                                          studio_name=studio_name)
+            if review_candidate is None:
+                break
+            if own_names is None:
+                own_names = own_studio_names(db, provider, scene_stashdb_id, studio_name)
+            if not studio_gate.is_unrelated(db, provider, studio_name, own_names, performer_names, review_candidate.get("title")):
+                break
+            unrelated.append(review_candidate.get("title"))
+            logger.info("scene %s: %r set aside, its studio is not connected to %r", scene_stashdb_id, review_candidate.get("title"), studio_name)
+            review_candidate = None
+        taken_titles = taken_titles + unrelated
         _log(_explain_candidates(releases, review_resolutions, scene_title, scene_date, performer_names,
                                  is_vr, rejected_titles, None, review_candidate, vr_rules,
                                  allow_unknown_resolution, taken_titles, size_limits, duration_s))
