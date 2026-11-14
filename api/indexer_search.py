@@ -1640,7 +1640,7 @@ def search_and_grab(db, whisparr_client, movie_id, provider, scene_stashdb_id, s
         return _finish(RESULT_NO_CANDIDATES)
     # Release names the stash-box shows as ANOTHER scene (studio + date of the name, performer in its cast; v0.259.0) are never this scene's
     taken_titles += other_scene_check.titles_of_other_scenes(provider, scene_stashdb_id, scene_date, performer_names, studio_name, releases,
-                                                        own_studio_names(db, provider, scene_stashdb_id, studio_name))
+                                                        own_studio_names(db, provider, scene_stashdb_id, studio_name), scene_title=scene_title)
 
     allowed_resolutions = quality_profile["resolutions"] if quality_profile else []
     # Fetched once, up front, and used both here and in the review-

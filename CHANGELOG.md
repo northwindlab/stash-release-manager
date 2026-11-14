@@ -6,6 +6,9 @@ Version rules (from 0.199.0 on; before, almost every change raised the MINOR num
 MINOR = a new capability a user can use, or a change that needs the user to act; MAJOR = something that worked breaks. 1.0.0 comes when the
 install guide has been proven on other machines. Documentation only gets no version.
 
+## 0.260.8
+- **Needs review: an undated release name that is another scene's title is not offered.** The other-scene check only knew release names with a studio prefix and a date. Now a name without a date is checked by its title: the words left after the performers / studio and the quality tail are searched on the stash-box; when another scene (not the wanted one) has exactly that title and one of its performers or its studio is named in the release, the release counts as that scene's and is not offered (also removed from stored Needs-review candidates at start-up). A name containing the wanted scene's own title is never touched, a failing lookup keeps the candidate. Sidecar (rebuild).
+
 ## 0.260.7
 - **Scenes with a year-only (or year-month) date get the last-resort resolutions too.** The setting that accepts 2160p / SD releases for older scenes read the scene date only as a full day; a catalogue entry dated just "2007" counted as having no date, so those resolutions were never offered for it. A year now counts as its last day, a year-month as the last day of the month. Sidecar (rebuild) + version in the plugin.
 

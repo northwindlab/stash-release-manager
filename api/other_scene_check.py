@@ -71,7 +71,81 @@ def _scenes_of(client, prefix, date):
     return scenes
 
 
-def titles_of_other_scenes(provider, scene_id, scene_date, performer_names, studio_name, releases, also_own=()):
+_TAIL_RE = re.compile(r"\b(?:xxx|\d{3,4}p|x26[45]|h26[45]|hevc|mp4|wmv|avi|mkv|webdl|web)\b")
+_title_cache = {}  # compact title words -> (time, [matching scenes])
+MIN_TITLE_CHARS = 8
+
+
+def title_words(release_title, strip_names):
+    """The words of a release name that are neither the group / quality tail nor one of `strip_names` (performers, studio spellings), e.g.
+    "Fiona.Dagger.Sis.Lets.You.Creampie.1080p" with {"fionadagger"} -> "Sis Lets You Creampie". Names are removed as whole word runs."""
+    text = re.sub(r"[^A-Za-z0-9]+", " ", release_title or "").strip()
+    m = _TAIL_RE.search(text.lower())
+    if m:
+        text = text[:m.start()].strip()
+    words = text.split()
+    changed = True
+    while changed and words:
+        changed = False
+        for name in sorted((n for n in strip_names if n), key=len, reverse=True):
+            for size in range(1, len(words) + 1):
+                if compact("".join(words[:size])) == name:  # a name at the start ...
+                    words, changed = words[size:], True
+                    break
+            else:
+                for size in range(1, len(words) + 1):
+                    if compact("".join(words[-size:])) == name:  # ... or at the end
+                        words, changed = words[:-size], True
+                        break
+            if changed:
+                break
+    return " ".join(words)
+
+
+def _scenes_titled(client, words):
+    key = compact(words)
+    with _lock:
+        hit = _title_cache.get(key)
+        if hit and time.time() - hit[0] < CACHE_SECONDS:
+            return hit[1]
+    found = (client.search_scenes(words, limit=10) or {}).get("results") or []
+    with _lock:
+        _title_cache[key] = (time.time(), found)
+    return found
+
+
+def _is_other_titled_scene(client, scene_id, scene_title, release_title, names, own_studio, asked):
+    """A release name without a date whose title part (the name minus performers / studio and the quality tail) is the title of ANOTHER scene of the
+    stash-box that has one of the named performers or the named studio. Our own scene's title in the name settles it the other way (it is ours).
+    A failing lookup returns False (the candidate stays)."""
+    compact_title = compact(release_title)
+    if scene_title and len(compact(scene_title)) >= 4 and compact(scene_title) in compact_title:
+        return False
+    named = [n for n in list(names) + sorted(own_studio) if n and n in compact_title]
+    if not named:
+        return False
+    words = title_words(release_title, set(names) | set(own_studio))
+    if len(compact(words)) < MIN_TITLE_CHARS:
+        return False
+    if compact(words) not in asked and len(asked) >= MAX_LOOKUPS:
+        return False
+    asked.add(compact(words))
+    try:
+        scenes = _scenes_titled(client, words)
+    except Exception as e:
+        logger.warning("other_scene_check: title lookup %r failed: %s", words, e)
+        return False
+    for sc in scenes:
+        if sc.get("id") == scene_id or compact(sc.get("title")) != compact(words):
+            continue
+        cast = [compact(p.get("name")) for p in (sc.get("performers") or [])]
+        studio = compact((sc.get("studio") or {}).get("name"))
+        if any(c and c in compact_title for c in cast) or (studio and studio in compact_title):
+            return True
+    return False
+
+
+def titles_of_other_scenes(provider, scene_id, scene_date, performer_names, studio_name, releases, also_own=(), scene_title=None):
     """The release names among `releases` that belong to another scene of the stash-box (see the module docstring)."""
     client = _get_client(provider) if _get_client and provider == "stashdb" else None
     if client is None or not hasattr(client, "find_scenes_on_date"):
@@ -84,7 +158,11 @@ def titles_of_other_scenes(provider, scene_id, scene_date, performer_names, stud
     for r in releases or []:
         title = r.get("title") or ""
         split = split_release(title)
-        if not split or not names or not any(n in compact(title) for n in names):
+        if not split:  # no studio + date part: a name like "Performer.Scene.Title.1080p" -- is its title another scene's title?
+            if _is_other_titled_scene(client, scene_id, scene_title, title, names, own_studio, asked):
+                out.append(title)
+            continue
+        if not names or not any(n in compact(title) for n in names):
             continue  # a release that does not even name one of our performers is no candidate anyway
         prefix, date = split
         if date == scene_date and compact(prefix) in own_studio:
@@ -131,7 +209,8 @@ def sweep_review_candidates(db):
         far = indexer_search._release_date_far_off(r["scene_date"], title, indexer_search.REVIEW_MAX_DAYS_ANY)
         try:
             hit = far or titles_of_other_scenes(r["provider"], r["scene_stashdb_id"], r["scene_date"], names, r["studio_name"], [{"title": title}],
-                                         indexer_search.own_studio_names(db, r["provider"], r["scene_stashdb_id"], r["studio_name"]))
+                                         indexer_search.own_studio_names(db, r["provider"], r["scene_stashdb_id"], r["studio_name"]),
+                                         scene_title=r["title"])
         except Exception as e:
             logger.warning("other_scene_check: sweep of %s failed: %s", r["scene_stashdb_id"], e)
             continue
