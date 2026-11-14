@@ -678,15 +678,22 @@ def fallback_resolutions(db, scene_date, today=None):
     and nothing in the profile turned up -- 2160p (the importer scales it down to 1080p, see transcode.py) and, with `fallback_accept_sd`, SD (480).
     Best first. Empty list: not old enough / switched off."""
     from routers.settings import get_setting_value
-    from datetime import date, datetime
+    from datetime import date, datetime, timedelta
     try:
         days = int(float(get_setting_value(db, "fallback_resolution_days", "10") or 0))
     except ValueError:
         days = 0
     if days <= 0 or not scene_date:
         return []
+    text = str(scene_date).strip()
     try:
-        released = datetime.strptime(str(scene_date)[:10], "%Y-%m-%d").date()
+        if len(text) == 4 and text.isdigit():  # a year-only date (older catalogue entries): counts as the END of that year
+            released = date(int(text), 12, 31)
+        elif len(text) == 7 and text[4] == "-":  # year-month: the last day of that month
+            first = date(int(text[:4]), int(text[5:7]), 1)
+            released = (date(first.year + (first.month == 12), first.month % 12 + 1, 1)) - timedelta(days=1)
+        else:
+            released = datetime.strptime(text[:10], "%Y-%m-%d").date()
     except ValueError:
         return []
     if ((today or date.today()) - released).days < days:

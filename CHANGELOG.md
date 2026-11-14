@@ -6,6 +6,9 @@ Version rules (from 0.199.0 on; before, almost every change raised the MINOR num
 MINOR = a new capability a user can use, or a change that needs the user to act; MAJOR = something that worked breaks. 1.0.0 comes when the
 install guide has been proven on other machines. Documentation only gets no version.
 
+## 0.260.7
+- **Scenes with a year-only (or year-month) date get the last-resort resolutions too.** The setting that accepts 2160p / SD releases for older scenes read the scene date only as a full day; a catalogue entry dated just "2007" counted as having no date, so those resolutions were never offered for it. A year now counts as its last day, a year-month as the last day of the month. Sidecar (rebuild) + version in the plugin.
+
 ## 0.260.6
 - **A poor download is kept when the scene has no file yet.** A download from a release name without a resolution that turned out to be outside the quality profile (e.g. 480p) used to go to the recycle bin and the scene back on the wishlist. Now the file is only thrown away when Stash already holds that scene (a duplicate that adds nothing). If the library has no file for the scene, the file is imported as usual and, with a cutoff set in the quality profile, the next library check lists it as "below cutoff" for the upgrade search. A failed library lookup also keeps the file. Sidecar (rebuild) + version in the plugin.
 
