@@ -386,7 +386,7 @@ def _import_one(db, stash_client, stashdb_client, source_item, source_remote_roo
             return {"stash_id": stash_id, **reencoded}
         original_file, source_file = source_file, reencoded["file"]
     rejected = _reject_unwanted_resolution(db, provider, stash_id, source_file, local_output_path,
-                                           local_media_mount, recycle_bin_path, keep_source=keep_source)
+                                           local_media_mount, recycle_bin_path, keep_source=keep_source, stash_client=stash_client)
     if rejected is not None:
         return rejected
 
@@ -801,8 +801,20 @@ def _encode_failed(db, provider, stash_id, error):
     return {"stash_id": stash_id, "status": "failed", "error": detail}
 
 
+def _scene_already_in_library(stash_client, provider, stash_id):
+    """True when Stash already holds a scene with this provider id (so a worse file adds nothing). A lookup that fails counts as
+    False: keeping an unwanted file is reversible, deleting a wanted one is not."""
+    if stash_client is None:
+        return False
+    try:
+        return stash_client.find_scene_by_stashdb_id(stash_id, _provider_endpoint(provider, stash_client, None)) is not None
+    except Exception:
+        logger.exception("library lookup for scene %s failed -- treating it as not in the library", stash_id)
+        return False
+
+
 def _reject_unwanted_resolution(db, provider, stash_id, source_file, local_output_path,
-                                local_media_mount, recycle_bin_path, keep_source=False):
+                                local_media_mount, recycle_bin_path, keep_source=False, stash_client=None):
     """Post-download resolution check (2026-09-26, user decision "c"): a
     release whose NAME carries no resolution may be grabbed (see
     indexer_search._select_best()'s allow_unknown_resolution), so its real
@@ -835,6 +847,12 @@ def _reject_unwanted_resolution(db, provider, stash_id, source_file, local_outpu
     effective = max(height, int((width or 0) * 9 / 16))
     bucket = next((h for h, _label in quality_detect.RESOLUTION_BUCKETS if effective >= h), 0)
     if bucket in allowed:
+        return None
+    if not _scene_already_in_library(stash_client, provider, stash_id):
+        # The library has nothing for this scene yet: a poor file beats none (user, 2026-11-14). It is imported as usual and the
+        # library check lists it as 'below cutoff' for the upgrade search; only a duplicate of an existing file is thrown away.
+        history.scene("info", "import", f"Downloaded {title!r} is {width}x{height} ({bucket or 'below 480'}p class), below the quality "
+                      f"profile -- kept because the scene has no file yet, the upgrade search looks for a better one", provider, stash_id)
         return None
     detail = (f"Downloaded {title!r}: the file is {width}x{height} ({bucket or 'below 480'}p class), "
               f"not in the quality profile ({', '.join(f'{r}p' for r in allowed)}) -- blocklisted, "
