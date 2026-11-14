@@ -11,7 +11,7 @@
   // rule and the bug it caused when this drifted). Change this if you
   // install under a different folder name.
   // Must equal `version:` in stash-release-manager.yml (scripts/test_plugin_version.py checks it).
-  const PLUGIN_VERSION = '0.260.3';
+  const PLUGIN_VERSION = '0.260.4';
   const PLUGIN_ID = 'stash-release-manager';
   const PLUGIN_NAME = 'StashReleaseManager';
 
@@ -2303,10 +2303,12 @@
                 if (result.result && !result.grab) { // the sidecar did not send it (e.g. another download of the scene is running)
                   rowStatus.textContent = ` not grabbed: ${SEARCH_RESULT_LABEL[result.result] || String(result.result).replace(/_/g, ' ')}`;
                   // v0.260.3: the refusal can be overridden by hand (the same release was in SABnzbd's history / failed / was blocklisted before)
-                  if (result.result === 'duplicate_download' && !force && (!opts || !opts.grab || opts.forceGrab)) {
+                  if ((result.result === 'duplicate_download' || result.result === 'daily_grab_cap') && !force && (!opts || !opts.grab || opts.forceGrab)) {
+                    const cap = result.result === 'daily_grab_cap';
                     rowStatus.append(' ', grabButton('Grab anyway', 'srw-btn', null,
-                      `Fetch "${candidate.title}" again although it was downloaded or refused before? It leaves this scene's blocklist and its old SABnzbd entries are cleared.`,
-                      'Overrides the duplicate protection for this one release', true));
+                      cap ? `The daily grab limit is reached. Fetch "${candidate.title}" anyway? It still counts towards today's limit.`
+                        : `Fetch "${candidate.title}" again although it was downloaded or refused before? It leaves this scene's blocklist and its old SABnzbd entries are cleared.`,
+                      cap ? 'Overrides the daily grab limit for this one release' : 'Overrides the duplicate protection for this one release', true));
                   }
                   return;
                 }

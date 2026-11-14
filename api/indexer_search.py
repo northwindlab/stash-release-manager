@@ -1842,7 +1842,7 @@ def send_to_download_client(db, candidate, warn, force=False):
         logger.warning("indexer_search: no enabled download client configured for protocol %r", protocol)
         return {"result": RESULT_NO_DOWNLOAD_CLIENT}
     if client_row["type"] == "qbittorrent":
-        return _send_to_qbittorrent(db, candidate, client_row, warn)
+        return _send_to_qbittorrent(db, candidate, client_row, warn, force=force)
     if client_row["type"] != "sabnzbd":
         logger.warning("indexer_search: download client type %r not implemented yet", client_row["type"])
         return {"result": RESULT_CLIENT_NOT_IMPLEMENTED}
@@ -1854,7 +1854,7 @@ def send_to_download_client(db, candidate, warn, force=False):
         warn(f"Grab skipped: {reason}")
         return {"result": RESULT_DUPLICATE_DOWNLOAD}
     today, used, cap = _grab_budget(db)
-    if used >= cap:
+    if used >= cap and not force:  # a hand-picked release ("Grab anyway") is still counted, but not refused
         logger.warning("indexer_search: daily grab cap reached (%s/%s) -- not grabbing %r", used, cap, candidate.get("title"))
         warn(f"Grab skipped: daily grab cap reached ({used}/{cap}; setting max_grabs_per_day)")
         return {"result": RESULT_DAILY_CAP}
@@ -1869,7 +1869,7 @@ def send_to_download_client(db, candidate, warn, force=False):
     return {"result": RESULT_GRABBED, "client_row": client_row, "nzo_id": nzo_id}
 
 
-def _send_to_qbittorrent(db, candidate, client_row, warn):
+def _send_to_qbittorrent(db, candidate, client_row, warn, force=False):
     """The torrent half of send_to_download_client(): same duplicate guard + daily cap, then the torrent goes to qBittorrent (the sidecar fetches the
     .torrent itself, so the indexer's key never reaches qBittorrent); the indexer's seed goals become per-torrent share limits (else the client's
     own). `nzo_id` is the torrent's info hash, the job id every caller stores."""
@@ -1880,7 +1880,7 @@ def _send_to_qbittorrent(db, candidate, client_row, warn):
         warn(f"Grab skipped: {reason}")
         return {"result": RESULT_DUPLICATE_DOWNLOAD}
     today, used, cap = _grab_budget(db)
-    if used >= cap:
+    if used >= cap and not force:  # a hand-picked release ("Grab anyway") is still counted, but not refused
         logger.warning("indexer_search: daily grab cap reached (%s/%s) -- not grabbing %r", used, cap, candidate.get("title"))
         warn(f"Grab skipped: daily grab cap reached ({used}/{cap}; setting max_grabs_per_day)")
         return {"result": RESULT_DAILY_CAP}
@@ -1913,7 +1913,7 @@ def grab_candidate(db, provider, scene_stashdb_id, candidate, replace_job=False,
     auto-accepted candidate uses, instead of a second, drifting copy.
     `replace_job` (v0.231.0): the scene's running download is being replaced (a dead torrent), so it does not stop the grab; the caller
     removes the old download.
-    `force` (v0.260.3): the user's explicit "Grab anyway" -- the duplicate guard no longer refuses a release that was in SABnzbd's history / failed
+    `force` (v0.260.3): the user's explicit "Grab anyway" -- the daily cap does not refuse it and the duplicate guard no longer refuses a release that was in SABnzbd's history / failed
     before, and the release leaves this scene's blocklist (it is wanted again)."""
     def _finish(result, grab=None):
         release_repo.set_search_result_for_scene(db, provider, scene_stashdb_id, result)

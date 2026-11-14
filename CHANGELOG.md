@@ -6,6 +6,9 @@ Version rules (from 0.199.0 on; before, almost every change raised the MINOR num
 MINOR = a new capability a user can use, or a change that needs the user to act; MAJOR = something that worked breaks. 1.0.0 comes when the
 install guide has been proven on other machines. Documentation only gets no version.
 
+## 0.260.4
+- **"Grab anyway" also overrides the daily grab limit.** The same button now appears when a hand-picked release is refused with "the daily grab limit is reached (setting max_grabs_per_day)": after a confirmation it is sent anyway (usenet and torrent) and still counts towards the day's total. The limit itself is unchanged (Settings > max_grabs_per_day, default 30); automatic grabs keep obeying it. Plugin + sidecar (rebuild, Reload plugins).
+
 ## 0.260.3
 - **"Grab anyway" overrides the duplicate protection.** A release picked by hand in the manual search was refused ("not grabbed: duplicate download") when SABnzbd had it in its history or Archive, it had failed twice, or this program had downloaded it before -- e.g. a release marked as wrong by mistake. The refusal now says why (the text of the Releases list) and offers a **Grab anyway** button: after a confirmation the release leaves the scene's blocklist, its earlier SABnzbd history / Archive entries are removed (so SABnzbd's own "Duplicate NZB" check does not fail it again) and it is sent. A release that is in the SABnzbd queue right now is still refused. Also on the Stuck torrent search. Plugin + sidecar (rebuild, Reload plugins). Test `scripts/test_force_grab.py`.
 
