@@ -6,6 +6,9 @@ Version rules (from 0.199.0 on; before, almost every change raised the MINOR num
 MINOR = a new capability a user can use, or a change that needs the user to act; MAJOR = something that worked breaks. 1.0.0 comes when the
 install guide has been proven on other machines. Documentation only gets no version.
 
+## 0.258.9
+- **Userscript: "dismissed" has its own colour.** A scene dismissed in StashReleaseManager showed the same grey as a scene the sidecar does not know at all. Dismissed is amber now (bar border, chip dot, tooltip unchanged); grey / no colour still means "not known". The script version is 0.258.9 (the sidecar serves it from the image: rebuild, then update the script in Violentmonkey).
+
 ## 0.258.8
 - **Convert: the "Converting now" line stays short.** With many files waiting for the finishing step (it runs one file at a time and waits while Stash is busy, 60+ rows happened) the line listed every one of them. Now it names the running files and the three that have waited longest, then "and N more finishing"; "show" still opens the full list. Plugin only.
 

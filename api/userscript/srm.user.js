@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         StashReleaseManager for stash-box sites
 // @namespace    stash-release-manager
-// @version      0.257.0
+// @version      0.258.9
 // @icon         __SRM_URL__/userscript/icon-256.png
 // @description  On scene pages and scene cards: Send to wishlist (or as an upgrade of the file Stash has), Send and search, Open in Stash, Copy Stash-ID, plus a status colour. On performer and studio pages: Watch / Unwatch.
 // @match        https://stashdb.org/*
@@ -18,8 +18,8 @@
   const SRM = '__SRM_URL__';
   const SCENE_PATH = /^\/scenes\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
   // The colours of the Release Calendar pills: green imported / in the library, purple on the wishlist, blue found by a scan, red import failed;
-  // grey = dismissed; no colour = the sidecar does not know the scene.
-  const COLORS = { in_library: '#5cc98a', imported: '#5cc98a', sent_to_whisparr: '#aa87de', known: '#6fa8e0', import_failed: '#e05c5c', dismissed: '#8a8f98', none: 'rgba(255,255,255,.35)' };
+  // amber = dismissed (set aside by hand); grey / no colour = the sidecar does not know the scene.
+  const COLORS = { in_library: '#5cc98a', imported: '#5cc98a', sent_to_whisparr: '#aa87de', known: '#6fa8e0', import_failed: '#e05c5c', dismissed: '#e0a040', none: 'rgba(255,255,255,.35)' };
   const LABELS = { in_library: 'In your Stash library', imported: 'Imported', sent_to_whisparr: 'On the wishlist', known: 'Found by a scan, not on the wishlist yet', import_failed: 'Import failed', dismissed: 'Dismissed', none: 'Not in Stash, not known to StashReleaseManager' };
 
   const ENTITY_PATH = /^\/(performers|studios)\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
