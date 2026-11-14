@@ -23,6 +23,7 @@ right pair based on the active `file_import_source` setting.
 `_to_local_path()` does the one-prefix-swap translation itself.
 """
 import history
+import known_release
 import grp
 import json
 import logging
@@ -890,6 +891,8 @@ def _finalize_verification(db, stash_client, provider_client, provider, stash_id
         how = "phash matches the provider's" if verified is True else "the provider has no fingerprints for this scene"
         history.scene("info", "import", f"Imported (re-encoded to 1080p; {how})", provider, stash_id, details={"path": path})
         return {"stash_id": stash_id, "status": "imported", "path": path, "reencoded": True}
+    if verified is True:  # the release name and the hashes of a verified file belong together (collected only, see known_release.py)
+        known_release.record(db, stash_client, provider, stash_id, path, rows[0].get("grabbed_title") if rows else None, "import")
     if verified is True and upgrade_is_pending is not None and upgrade_is_pending(provider, stash_id):
         # Upgrade download (2026-09-26): merged into the existing library
         # scene by the hook instead of tagging a new one -- see
@@ -991,6 +994,11 @@ def _list_of_scene(db, provider, scene_id):
     return None
 
 
+def _grabbed_title_of(db, provider, stash_id):
+    rows = release_repo.list_rows_for_scene(db, provider, stash_id)
+    return rows[0].get("grabbed_title") if rows else None
+
+
 def identify_wrong_file(db, stash_client, provider_client, provider, stash_id, path):
     """Which provider scene is the file at `path` really (v0.260.0)? Asks the provider for the scenes its hashes are registered at (not `stash_id`
     itself). Returns {"id", "title", "list"} -- a scene we are looking for (wishlist / upgrade list) is preferred -- or None; the result is stored
@@ -1013,6 +1021,7 @@ def identify_wrong_file(db, stash_client, provider_client, provider, stash_id, p
             best = item
     release_repo.set_mismatch_found_for_scene(db, provider, stash_id, best)
     if best:
+        known_release.record(db, stash_client, provider, best["id"], path, _grabbed_title_of(db, provider, stash_id), "mismatch")
         history.scene("info", "import", f"The wrong file is the scene {best['title']!r}" + (f" ({best['list']})" if best["list"] else ""),
                       provider, stash_id, details={"found": best})
     return best

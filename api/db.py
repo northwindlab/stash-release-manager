@@ -144,6 +144,23 @@ CREATE TABLE IF NOT EXISTS upgrade_candidate (
     UNIQUE (scene_id, file_path)
 );
 
+-- Known releases (v0.261.0, see known_release.py): the release name a file's hashes belong to, collected at verified imports and at fingerprint
+-- mismatches whose file is another scene. Only collected so far.
+CREATE TABLE IF NOT EXISTS known_release (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider      TEXT NOT NULL,
+    scene_id      TEXT NOT NULL,
+    release_title TEXT NOT NULL,
+    oshash        TEXT,
+    phash         TEXT,
+    md5           TEXT,
+    duration      REAL,
+    size          INTEGER,
+    source        TEXT,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE (provider, scene_id, release_title)
+);
+
 -- Shared fingerprints (v0.246.0, see shared_fingerprint.py): scenes whose file is registered at several provider scenes and where the length
 -- cannot confirm the tag. One row per scene, worked through by the user in Maintenance > Organize library > Shared fingerprints.
 -- status: 'open', 'kept' (the user says the tag is right), 'retagged' (the user chose another scene), 'dismissed', 'resolved' (a later scan found it fine).

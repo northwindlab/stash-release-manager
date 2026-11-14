@@ -44,6 +44,14 @@ check("stored on the release", json.loads(row["mismatch_found"])["id"] == "B")
 check("a known scene that is not wanted: list None", fi.identify_wrong_file(db, Stash(), Provider([{"id": "C", "title": "Scene C"}]), "stashdb", "A", PATH)["list"] is None)
 check("nothing found -> None", fi.identify_wrong_file(db, Stash(), Provider([{"id": "A", "title": "x"}]), "stashdb", "A", PATH) is None)
 
+import known_release
+kr = known_release.for_scene(db, "stashdb", "B")
+check("the wrong file is collected as a known release of the scene it is", len(kr) == 1 and kr[0]["release_title"] == "Wrong.Release.1080p"
+      and kr[0]["oshash"] == "ab" and kr[0]["phash"] == "cd" and kr[0]["source"] == "mismatch")
+fi.identify_wrong_file(db, Stash(), p, "stashdb", "A", PATH)
+check("asking again does not duplicate it", len(known_release.for_scene(db, "stashdb", "B")) == 1)
+check("nothing is collected without a release name", known_release.record(db, Stash(), "stashdb", "B", PATH, None, "import") is False)
+
 # place the file for B
 fi.identify_wrong_file(db, Stash(), p, "stashdb", "A", PATH)
 tagged, organized = [], []
