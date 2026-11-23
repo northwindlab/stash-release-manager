@@ -671,9 +671,12 @@
         const listName = (l) => (l === 'wishlist' ? 'your wishlist' : l === 'upgrade' ? 'your upgrade list' : '');
         if (found) {
           const where = found.list ? ` — which is on ${listName(found.list)}${found.list === 'upgrade' ? ' (not placed automatically)' : ''}.` : ' — not one you are looking for.';
-          foundNote.textContent = found.source === 'name'
-            ? `The release name looks like the scene "${found.title || found.id}"${found.list ? `, which is on ${listName(found.list)}` : ''} — the hashes of the file do not confirm it.`
-            : `The file is the scene "${found.title || found.id}"${where}` + (found.source === 'known' ? ' (same hashes as a release we already know)' : '');
+          // The scene's name opens it at the provider (stash-box), its studio is named next to it -- the same title can belong to another studio.
+          const sceneLink = () => el('a', { href: sceneUrl(r.provider, found.id), target: '_blank', rel: 'noopener noreferrer', textContent: `"${found.title || found.id}"` });
+          const studioPart = found.studio ? ` (${found.studio})` : '';
+          foundNote.replaceChildren(...(found.source === 'name'
+            ? ['The release name looks like the scene ', sceneLink(), studioPart + (found.list ? `, which is on ${listName(found.list)}` : '') + ' — the hashes of the file do not confirm it.']
+            : ['The file is the scene ', sceneLink(), studioPart + where + (found.source === 'known' ? ' (same hashes as a release we already know)' : '')]));
         } else if (check && check.checked) {
           foundNote.textContent = `Checked ${check.checked}: no other scene is known for this file (provider and our own records). `
             + (check.name_fits === true ? 'The release name fits this scene, so this is probably an encode nobody has registered — "File is correct" keeps it.'

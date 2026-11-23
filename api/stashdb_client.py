@@ -88,7 +88,7 @@ query($id: ID!) { findScene(id: $id) { id urls { url site { name } } } }
 
 FIND_SCENES_BY_FINGERPRINTS_QUERY = """
 query($fps: [[FingerprintQueryInput!]!]!) {
-  findScenesBySceneFingerprints(fingerprints: $fps) { id title }
+  findScenesBySceneFingerprints(fingerprints: $fps) { id title studio { name } }
 }
 """
 
@@ -607,7 +607,7 @@ class StashDBClient:
         content, so they're grouped together in one StashDB "scene"
         slot rather than one call per fingerprint). Returns a list the
         same length and order as the input, each entry a (possibly
-        empty) list of {"id", "title"} matches -- StashDB's own reverse
+        empty) list of {"id", "title", "studio": {"name"}} matches -- StashDB's own reverse
         lookup, "which scene(s) is this fingerprint registered against"
         (confirmed live 2026-09-15 while designing the "audit the
         existing library" tool: given a mismatched local file's own

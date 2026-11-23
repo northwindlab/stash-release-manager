@@ -1098,8 +1098,8 @@ def _known_release_match(db, provider, stash_id, fps):
                            "ORDER BY id LIMIT 1", [provider, str(stash_id), *args]).fetchone()
         if row is None:
             return None
-        rel = conn.execute("SELECT title FROM release WHERE provider = ? AND scene_stashdb_id = ? LIMIT 1", (provider, row["scene_id"])).fetchone()
-    return {"id": row["scene_id"], "title": (rel["title"] if rel else "") or ""}
+        rel = conn.execute("SELECT title, studio_name FROM release WHERE provider = ? AND scene_stashdb_id = ? LIMIT 1", (provider, row["scene_id"])).fetchone()
+    return {"id": row["scene_id"], "title": (rel["title"] if rel else "") or "", "studio": (rel["studio_name"] if rel else None) or None}
 
 
 def _name_verdict(db, provider, stash_id, grabbed_title):
@@ -1115,7 +1115,7 @@ def _name_verdict(db, provider, stash_id, grabbed_title):
     other = None
     with db.connect() as conn:
         wanted = [dict(r) for r in conn.execute(
-            """SELECT provider, scene_stashdb_id, title, scene_date, cast_names FROM release WHERE provider = ? AND scene_stashdb_id != ?
+            """SELECT provider, scene_stashdb_id, title, studio_name, scene_date, cast_names FROM release WHERE provider = ? AND scene_stashdb_id != ?
                AND status = 'sent_to_whisparr' AND download_job_id IS NULL AND upgrade_of IS NULL""", (provider, str(stash_id)))]
     seen = set()
     for r in wanted:
@@ -1123,7 +1123,7 @@ def _name_verdict(db, provider, stash_id, grabbed_title):
             continue
         seen.add(r["scene_stashdb_id"])
         if indexer_search._candidate_plausible(r["title"], r["scene_date"], split(r), grabbed_title):
-            other = {"id": r["scene_stashdb_id"], "title": r["title"], "list": "wishlist"}
+            other = {"id": r["scene_stashdb_id"], "title": r["title"], "studio": r["studio_name"] or None, "list": "wishlist"}
             break
     return fits, other
 
@@ -1131,7 +1131,7 @@ def _name_verdict(db, provider, stash_id, grabbed_title):
 def identify_wrong_file(db, stash_client, provider_client, provider, stash_id, path):
     """Which scene is the wrong file at `path` really (v0.260.0, widened v0.260.16)? Looked up in three places, the first answer wins: the provider
     (scenes its hashes are registered at, other than `stash_id`; a scene we are looking for is preferred), our own known releases (same hashes), then
-    the release name (a clue only, `source` "name"). Returns {"id", "title", "list", "source"} or None. EVERY check is stored on the release
+    the release name (a clue only, `source` "name"). Returns {"id", "title", "studio", "list", "source"} or None. EVERY check is stored on the release
     (mismatch_found) so the Import-failed row can show it -- also an empty one: {"id": None, "checked": ..., "name_fits": bool}."""
     scene = stash_client.find_scene_by_path(path)
     file = next((f for f in (scene or {}).get("files", []) if f["path"] == path), None)
@@ -1143,7 +1143,8 @@ def identify_wrong_file(db, stash_client, provider_client, provider, stash_id, p
         for m in matches:
             if str(m.get("id")) == str(stash_id):
                 continue
-            item = {"id": m.get("id"), "title": m.get("title") or "", "list": _list_of_scene(db, provider, m.get("id")), "source": "provider"}
+            item = {"id": m.get("id"), "title": m.get("title") or "", "studio": ((m.get("studio") or {}).get("name") or "") or None,
+                    "list": _list_of_scene(db, provider, m.get("id")), "source": "provider"}
             if best is None or (item["list"] and not best["list"]):
                 best = item
     if best is None and fp_values:
