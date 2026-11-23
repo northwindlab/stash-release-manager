@@ -145,6 +145,19 @@ def _eta(seconds):
     return f"{seconds // 3600}:{seconds % 3600 // 60:02d}:{seconds % 60:02d}"
 
 
+_LISTED = "__listed__"  # key of the set of every torrent hash a qBittorrent client listed (absent: the client did not answer / is no torrent client)
+
+
+def _gone(slots, job_id):
+    """True when the client ANSWERED and does not know this torrent at all (removed by hand in the client): not a finished download."""
+    listed = (slots or {}).get(_LISTED)
+    return listed is not None and str(job_id or "").lower() not in listed
+
+
+def _gone_phase():
+    return {"phase": "torrent_problem", "health": torrent_health.MISSING, "health_detail": torrent_health.GONE_DETAIL}
+
+
 def _client_slots(client_row):
     """{job id: {status, percentage, timeleft, mb, mbleft}} of what the client is still DOWNLOADING (SABnzbd queue / qBittorrent torrents below
     100 %), in one shape. A finished torrent that keeps seeding is not listed (it waits for the import, then seeds on). Best effort: an
@@ -157,13 +170,16 @@ def _client_slots(client_row):
         if client_row["type"] == "qbittorrent":
             client = QbittorrentClient(client_row["url"], client_row["username"], client_row["password"], client_row["category"])
             out = {}
-            for t in client.get_torrents():
+            listed = set()
+            for t in client.get_torrents(category=""):  # every category, like the monitor: a torrent filed elsewhere is still there
+                listed.add(str(t.get("hash") or "").lower())
                 if (t.get("progress") or 0) >= 1 and qbittorrent_client.status_of(t) != "error":
                     continue
                 out[t["hash"]] = {"status": qbittorrent_client.status_of(t).capitalize(), "percentage": str(int((t.get("progress") or 0) * 100)),
                                   "timeleft": _eta(t.get("eta")), "mb": str(round((t.get("size") or 0) / 1e6, 2)),
                                   "mbleft": str(round((t.get("amount_left") or 0) / 1e6, 2)),
                                   "_torrent": t}  # the client's own numbers, for the live swarm / stall display (_overlay_torrent_health)
+            out[_LISTED] = listed  # what the client answered with: a torrent that is not in it is gone (see _gone), not "finished"
             return out
     except Exception:
         return {}
@@ -199,6 +215,7 @@ def download_progress():
     result = {}
     live = import_progress.snapshot()
     queues_by_client = {}
+    gone = []  # (client id, job id) of torrents the client no longer has
     for release in releases:
         client_id = release["download_client_id"]
         if client_id not in queues_by_client:
@@ -208,6 +225,11 @@ def download_progress():
         slot = queues_by_client[client_id].get(release["download_job_id"])
         if scene_id in live:
             result[scene_id] = _import_phase(live[scene_id], scene_id)
+        elif slot is None and _gone(queues_by_client[client_id], release["download_job_id"]):
+            # Not in the client at all (removed there by hand): not "download complete". Shown at once; the monitor is asked for a round so that
+            # the Stuck list and the History follow within seconds instead of at the next look (up to `torrent_health_minutes` later).
+            result[scene_id] = _gone_phase()
+            gone.append((client_id, release["download_job_id"]))
         elif slot is None:
             # Gone from the client's live queue: finished (or post-
             # processing) and not picked up by an import run yet.
@@ -239,7 +261,10 @@ def download_progress():
                 slots_by_nzo = _client_slots(download_client_repo.get_one(_db, client_id) if client_id else None)
                 queues_by_client[client_id] = slots_by_nzo
             slot = queues_by_client[client_id].get(film.get("download_job_id"))
-            if slot is None:
+            if slot is None and _gone(queues_by_client[client_id], film.get("download_job_id")):
+                result[key] = _gone_phase()
+                gone.append((client_id, film.get("download_job_id")))
+            elif slot is None:
                 result[key] = {"phase": "waiting_import"}
             else:
                 result[key] = {"phase": "downloading", "status": slot.get("status"), "percentage": slot.get("percentage"),
@@ -259,7 +284,21 @@ def download_progress():
             continue
         result.setdefault(scene_id, _import_phase(entry, scene_id))
     _overlay_torrent_health(result, queues_by_client)
+    _ask_for_round(gone)
     return result
+
+
+def _ask_for_round(gone):
+    """A torrent the client no longer has that the monitor has not flagged yet: one monitor round now (throttled), so it is recorded and listed."""
+    try:
+        for client_id, job_id in gone:
+            row = torrent_health.get_row(_db, client_id, str(job_id))
+            if row is None or row["state"] != torrent_health.MISSING:
+                from routers.torrent_health import kick_round
+                kick_round()
+                return
+    except Exception:
+        logger.exception("download_progress: asking for a torrent check failed")
 
 
 def _overlay_torrent_health(result, queues_by_client=None):

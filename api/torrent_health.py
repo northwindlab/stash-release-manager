@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 
 OK, STALLED, STUCK, ERROR, MISSING = "ok", "stalled", "stuck", "error", "missing"
 PROBLEM_STATES = (STALLED, STUCK, ERROR, MISSING)
+GONE_DETAIL = "removed from the download client"
 
 
 def default_cfg():
@@ -174,7 +175,7 @@ def classify(torrent, prev, now, cfg, error_found=None):
         return continuous and prev.get("state") == state
 
     if torrent is None:
-        return dead(MISSING, "removed from the download client", confirmed=seen_before(MISSING))
+        return dead(MISSING, GONE_DETAIL, confirmed=seen_before(MISSING))
     status = qbittorrent_client.status_of(torrent)
     raw = torrent.get("state") or ""
     if status == "error":
@@ -499,6 +500,49 @@ def abandon(db, client_id, job_id):
                              rejected_titles=[*film.get("rejected_titles", []), "hash:" + row["job_id"]])
     delete_row(db, client_id, job_id)
     _history(row, "warning", f"Torrent removed by hand, back in the search queue: {row['title']}")
+    return {"ok": True}
+
+
+def dismiss(db, client_id, job_id):
+    """"Dismiss": the entry is dropped for good -- the torrent goes from the client (with its data, when it is still there), nothing is searched
+    again and nothing is blocked (the scene or movie arrived another way, or is not wanted any more). A scene on the wishlist is dismissed; an
+    UPGRADE download leaves the library file as it was and its candidate is dismissed; a movie is dismissed (an upgrade of a movie goes back to
+    plain 'imported')."""
+    row = get_row(db, client_id, job_id)
+    if row is None:
+        return {"error": "this torrent is not on the monitor's list (any more)"}
+    client = _client_of(db, client_id)
+    if client is not None:
+        remove_torrent(client, row["job_id"])
+    if row["kind"] == "scene":
+        import json
+        import release_repo
+        import upgrades
+        provider, pid = row["provider"], row["scene_id"]
+        rows = upgrades._scene_rows(db, provider, pid)
+        upgrade_of = next((r.get("upgrade_of") for r in rows if r.get("upgrade_of")), None)
+        release_repo.set_download_job_for_scene(db, provider, pid, None, None)
+        cand = None
+        if upgrade_of:
+            with db.connect() as conn:
+                cand = conn.execute("SELECT * FROM upgrade_candidate WHERE provider_scene_id = ? AND file_path = ?", (pid, upgrade_of)).fetchone()
+        if cand is not None:  # the rows go back as they were before the grab (only the pseudo row of a library scene is removed)
+            cand = dict(cand)
+            previous = [(r["entity_type"], r["entity_stashdb_id"], "imported" if r.get("imported_at") else "new")
+                        for r in rows if not str(r["entity_stashdb_id"]).startswith("upgrade:")]
+            upgrades._undo_release_rows(db, cand, previous)
+            upgrades.set_candidate(db, cand["id"], status="dismissed", review_candidate=None, last_search_result="dismissed")
+        else:
+            release_repo.set_status_for_scene(db, provider, pid, "dismissed")
+    else:
+        import film_import
+        import film_repo
+        film = film_repo.get(db, row["film_id"])
+        if film:
+            fields = {"status": "imported", "upgrading": 0, "upgrade_wanted": 0} if film.get("upgrading") else {"status": "dismissed"}
+            film_repo.update(db, film["id"], **fields, download_job_id=None, download_client_id=None, review_candidate=None)
+    delete_row(db, client_id, job_id)
+    _history(row, "info", f"Dismissed from the torrents needing a look: {row['title']}")
     return {"ok": True}
 
 

@@ -6,6 +6,9 @@ Version rules (from 0.199.0 on; before, almost every change raised the MINOR num
 MINOR = a new capability a user can use, or a change that needs the user to act; MAJOR = something that worked breaks. 1.0.0 comes when the
 install guide has been proven on other machines. Documentation only gets no version.
 
+## 0.262.0
+- **Torrents (from AnonTester's fork, 0.261.2 + 0.262.0):** a torrent removed by hand in the download client is noticed at once (Activity shows "removed from the download client" instead of "waiting for import", the Stuck list and History follow within seconds), and Activity > Stuck gets a "Dismiss" button on every torrent row (the torrent goes from the client, nothing is searched again, nothing is blocked). Plugin + sidecar (rebuild, Reload plugins).
+
 ## 0.261.1
 - **`/dashboard/calendar?vr=` filters VR / flat scenes now.** Sidecar (rebuild).
 

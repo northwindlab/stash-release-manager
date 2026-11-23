@@ -357,6 +357,8 @@
         buttons.push(act(el('button', { type: 'button', className: 'srw-btn', textContent: 'Re-add', title: 'Put the same torrent into the download client again' }), 'torrents_readd', row));
       }
       if (row.state !== 'stalled') buttons.push(act(el('button', { type: 'button', className: 'srw-btn', textContent: 'Keep waiting', title: 'No automatic switching for a day' }), 'torrents_keep', row));
+      buttons.push(act(el('button', { type: 'button', className: 'srw-btn', textContent: 'Dismiss', title: 'Drop this entry: the torrent goes (if the client still has it), nothing is searched again' }),
+        'torrents_dismiss', row, `Dismiss this entry? The torrent is removed from the download client (with its data) if it is still there, and ${scene ? 'the scene is not searched again' : 'the movie is dismissed'}.`));
       buttons.push(act(el('button', { type: 'button', className: 'srw-btn srw-btn-danger', textContent: 'Remove', title: 'Remove the torrent with its data, never use it again, and search again' }),
         'torrents_remove', row, `Remove this torrent with its downloaded data${scene ? '' : ' and put the movie back on the wishlist'}?`));
       const li = el('li', { className: `srw-torrent-problem srw-torrent-${row.state}` }, [

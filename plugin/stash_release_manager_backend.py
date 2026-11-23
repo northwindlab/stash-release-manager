@@ -843,7 +843,7 @@ def main():
         result = _get(sidecar_url, "/torrent-health", timeout=15)
     elif mode == "torrents_check_now":
         result = _post(sidecar_url, "/torrent-health/check-now", {}, timeout=15)
-    elif mode in ("torrents_switch", "torrents_remove", "torrents_readd", "torrents_keep"):
+    elif mode in ("torrents_switch", "torrents_remove", "torrents_readd", "torrents_keep", "torrents_dismiss"):
         # A search for another torrent can take a while (several indexer queries + the grab)
         result = _post(sidecar_url, "/torrent-health/" + mode.split("_", 1)[1],
                        {"client_id": args.get("client_id"), "job_id": args.get("job_id")}, timeout=90 if mode == "torrents_switch" else 30)
