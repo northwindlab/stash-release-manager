@@ -578,8 +578,10 @@
           onClick: (e) => {
             confirmInline(e.currentTarget,
               wantedElsewhere
-                ? `The file is "${known.title || known.id}", which is on your ${known.list === 'upgrade' ? 'upgrade list' : 'wishlist'}. Move it to the recycle bin anyway, blocklist the download and put "${r.title}" back on the wishlist?`
-                : `Move the wrong file for "${r.title}" to the recycle bin, blocklist that download, and put the scene back on the wishlist for a new search?`,
+                ? `The file is "${known.title || known.id}", which is on your ${known.list === 'upgrade' ? 'upgrade list' : 'wishlist'}. Move it to the recycle bin anyway, blocklist the download and ${r.upgrade_of ? `keep the upgrade of "${r.title}" wanted` : `put "${r.title}" back on the wishlist`}?`
+                : r.upgrade_of
+                  ? `Move the wrong download for "${r.title}" to the recycle bin and blocklist it? Your file in the library stays, the upgrade is wanted again.`
+                  : `Move the wrong file for "${r.title}" to the recycle bin, blocklist that download, and put the scene back on the wishlist for a new search?`,
               async () => {
                 fixStatus.textContent = ' fixing...';
                 try {

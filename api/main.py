@@ -2289,6 +2289,7 @@ async def lifespan(app: FastAPI):
         threading.Thread(target=run_tags_backfill, daemon=True).start()
         threading.Thread(target=lambda: download_failures.convert_failed_blocklists(db), daemon=True).start()  # a failed download blocks only its exact name (v0.260.5)
         threading.Thread(target=lambda: other_scene_check.sweep_review_candidates(db), daemon=True).start()  # drops stored review candidates that belong to another scene
+        threading.Thread(target=lambda: upgrades.repair_stranded_grabs(db), daemon=True).start()  # upgrades left 'grabbed' by a discarded download (v0.262.3)
         threading.Thread(target=convert_resume, daemon=True).start()  # Convert rows that were being checked / swapped when the sidecar stopped
         tasks += [asyncio.create_task(loop()) for loop in (
             _scan_loop, _safety_sweep_loop, _stashdb_favorites_loop, _box_favorites_loop, _whisparr_blocklist_sync_loop, _theporndb_identify_loop,

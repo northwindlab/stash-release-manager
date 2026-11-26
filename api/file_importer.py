@@ -1221,7 +1221,9 @@ def place_file_for_other_scene(db, stash_client, stashdb_client, provider, stash
         release_repo.set_import_error_for_scene(db, provider, stash_id, None, None)
         release_repo.set_pending_import_path_for_scene(db, provider, stash_id, None)
         release_repo.set_mismatch_found_for_scene(db, provider, stash_id, None)
-        history.scene("info", "wishlist", f"The downloaded file belongs to {found['title']!r}: blocklisted, back on the wishlist",
+        import upgrades
+        back = "the upgrade is wanted again" if upgrades.return_to_upgrade_list(db, provider, stash_id) else "back on the wishlist"
+        history.scene("info", "wishlist", f"The downloaded file belongs to {found['title']!r}: blocklisted, {back}",
                       provider, stash_id)
         _trigger_generate(stash_client, scene["id"])
         _after_import(scene["id"], path)
@@ -1805,6 +1807,11 @@ def fix_wrong_download(db, stash_client, whisparr_client, provider, scene_stashd
     release_repo.set_pending_import_path_for_scene(db, provider, scene_stashdb_id, None)
 
     release_repo.set_mismatch_found_for_scene(db, provider, scene_stashdb_id, None)
+    import upgrades
+    if upgrades.return_to_upgrade_list(db, provider, scene_stashdb_id):  # an upgrade download: wanted again there, not on the wishlist
+        history.scene("info", "upgrade", "Fix wrong download: wrong file to the recycle bin, the upgrade is wanted again",
+                      provider, scene_stashdb_id)
+        return {"blocklisted_title": blocklisted_title, "status": "upgrade_wanted"}
     history.scene("info", "wishlist", "Fix wrong download: wrong file to the recycle bin, back on the wishlist",
                   provider, scene_stashdb_id)
     return {"blocklisted_title": blocklisted_title, "status": "sent_to_whisparr"}

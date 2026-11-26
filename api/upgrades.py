@@ -330,7 +330,67 @@ def _prepare_release_rows(db, cand, detail, is_vr):
     with db.connect() as conn:
         conn.execute("UPDATE release SET status = 'sent_to_whisparr', upgrade_of = ? WHERE provider = ? "
                      "AND scene_stashdb_id = ?", (cand["file_path"], provider, pid))
+    # What was blocked for this candidate holds for the rows the search works on: a row made only for the upgrade is new and knows nothing.
+    known = set(release_repo.get_review_rejected_titles(db, provider, pid) or [])
+    for entry in _rejected_titles(cand):
+        if entry and entry not in known:
+            release_repo.add_review_rejected_title(db, provider, pid, entry)
     return previous
+
+
+def return_to_upgrade_list(db, provider, pid):
+    """A wrong upgrade download was thrown away (or given to another scene): nothing is downloading any more, so the candidate goes from
+    'grabbed' back to 'wanted' (v0.262.3 -- it stayed 'grabbed' and refused every search). The release rows go back as they were before the
+    grab (the row made only for the upgrade is removed), so that only the upgrade search works on the scene again; what is blocked moves
+    to the candidate. A candidate in any other state (moved to the wishlist by the user) is left alone. True when it went back."""
+    rows = _scene_rows(db, provider, pid)
+    old_path = next((r.get("upgrade_of") for r in rows if r.get("upgrade_of")), None)
+    if not old_path:
+        return False
+    with db.connect() as conn:
+        cand = conn.execute("SELECT * FROM upgrade_candidate WHERE provider = ? AND provider_scene_id = ? AND file_path = ?",
+                            (provider, pid, old_path)).fetchone()
+    if cand is None or cand["status"] != "grabbed":
+        return False
+    cand = dict(cand)
+    blocked = _rejected_titles(cand)
+    for r in rows:
+        try:
+            blocked += [t for t in json.loads(r.get("review_rejected_titles") or "[]")]
+        except ValueError:
+            pass
+    pseudo = f"upgrade:{cand['scene_id']}"
+    previous = [(r["entity_type"], r["entity_stashdb_id"], "imported" if r.get("imported_at") else "new")
+                for r in rows if r["entity_stashdb_id"] != pseudo]
+    release_repo.set_download_job_for_scene(db, provider, pid, None, None)
+    release_repo.set_import_error_for_scene(db, provider, pid, None, None)
+    release_repo.set_pending_import_path_for_scene(db, provider, pid, None)
+    release_repo.set_mismatch_found_for_scene(db, provider, pid, None)
+    _undo_release_rows(db, cand, previous)
+    if previous:
+        with db.connect() as conn:
+            conn.execute("DELETE FROM release WHERE provider = ? AND scene_stashdb_id = ? AND entity_stashdb_id = ?", (provider, pid, pseudo))
+    set_candidate(db, cand["id"], status="wanted", review_candidate=None, rejected_titles=json.dumps(list(dict.fromkeys(blocked))),
+                  last_search_result="rejected")
+    return True
+
+
+def repair_stranded_grabs(db):
+    """Start-up: candidates left 'grabbed' by a wrong download thrown away before v0.262.3 -- their rows wait without a download, a file or an
+    error, and something is blocked for the scene. Returns how many went back to 'wanted'."""
+    with db.connect() as conn:
+        grabbed = [dict(r) for r in conn.execute("SELECT * FROM upgrade_candidate WHERE status = 'grabbed'")]
+    fixed = 0
+    for cand in grabbed:
+        rows = [r for r in _scene_rows(db, cand["provider"], cand["provider_scene_id"]) if r.get("upgrade_of") == cand["file_path"]]
+        idle = rows and all(r["status"] == "sent_to_whisparr" and not r.get("download_job_id") and not r.get("pending_import_path")
+                            and not r.get("import_error_code") for r in rows)
+        if idle and any(json.loads(r.get("review_rejected_titles") or "[]") for r in rows):
+            if return_to_upgrade_list(db, cand["provider"], cand["provider_scene_id"]):
+                history.scene("info", "upgrade", "Upgrade is wanted again (it was still marked as downloading)", cand["provider"],
+                              cand["provider_scene_id"], scene_title=cand["scene_title"])
+                fixed += 1
+    return fixed
 
 
 def _undo_release_rows(db, cand, previous):
