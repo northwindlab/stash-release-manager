@@ -719,6 +719,15 @@ def confirm_file(provider: str, scene_stashdb_id: str, body: dict = None):
     return result
 
 
+@router.get("/{provider}/{scene_stashdb_id}/upgrade-compare")
+def upgrade_compare(provider: str, scene_stashdb_id: str):
+    """Old and new file of a failed upgrade download, for the question before "File is correct" -- see file_importer.upgrade_compare()."""
+    result = file_importer.upgrade_compare(_db, _get_stash_client(), provider, scene_stashdb_id)
+    if result.get("error"):
+        raise HTTPException(400, result["error"])
+    return result
+
+
 @router.post("/{provider}/{scene_stashdb_id}/identify-file")
 def identify_file(provider: str, scene_stashdb_id: str):
     """"Which scene is it?" on an Import-failed row -- see file_importer.identify_failed_import()."""

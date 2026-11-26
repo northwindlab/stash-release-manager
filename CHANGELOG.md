@@ -6,6 +6,9 @@ Version rules (from 0.199.0 on; before, almost every change raised the MINOR num
 MINOR = a new capability a user can use, or a change that needs the user to act; MAJOR = something that worked breaks. 1.0.0 comes when the
 install guide has been proven on other machines. Documentation only gets no version.
 
+## 0.262.2
+- **Import failed: "File is correct" and "Re-check fingerprints" work for upgrade downloads.** The question before replacing names both files (resolution, length, size) and warns when the new one is shorter; the old file goes to the recycle bin, the scene keeps rating, markers and history. Sidecar + plugin (rebuild, Reload plugins).
+
 ## 0.262.1
 - **Import failed: the scene a wrong file turned out to be is shown with its studio and its name links to the scene at the provider.** An older check needs "Check again" once. Sidecar + plugin (rebuild, Reload plugins).
 

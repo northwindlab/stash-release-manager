@@ -969,6 +969,17 @@ class StashClient:
         scene = data["findScene"]
         return scene["files"] if scene else None
 
+    def file_details(self, path):
+        """{"width", "height", "duration", "size"} of the library file at exactly `path`, or None when Stash doesn't have it."""
+        data = self._graphql(
+            "query($f: SceneFilterType) { findScenes(scene_filter: $f, filter: {per_page: 1}) { scenes { files { path width height duration size } } } }",
+            {"f": {"path": {"value": path, "modifier": "EQUALS"}}})
+        for scene in data["findScenes"]["scenes"]:
+            for f in scene["files"]:
+                if f["path"] == path:
+                    return {k: f.get(k) for k in ("width", "height", "duration", "size")}
+        return None
+
     def merge_scene_into(self, source_scene_id, destination_scene_id):
         """Stash's own scene merge: the source's files move to the
         destination, the destination keeps its metadata, play and O history

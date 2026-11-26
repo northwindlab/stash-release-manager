@@ -1254,12 +1254,12 @@ def confirm_mismatched_file(db, stash_client, stashdb_client, provider, stash_id
                     if r.get("import_error_code") == "fingerprint_mismatch" and r.get("pending_import_path")), None)
         if row is None:
             return {"error": "no failed import with a recorded file for this release"}
-        if row.get("upgrade_of"):
-            return {"error": "this is an upgrade download -- it is handled in Upgrade wanted / Activity > Needs review"}
         path = row["pending_import_path"]
         scene = stash_client.find_scene_by_path(path)
         if scene is None:
             return {"error": "Stash has no scene for this file (any more)"}
+        if row.get("upgrade_of"):
+            return _confirm_upgrade(db, stash_client, provider, stash_id, row["upgrade_of"], path, scene, submit)
         provider_client = _provider_client(provider, stashdb_client, get_provider_client)
         endpoint = _provider_endpoint(provider, stash_client, provider_client)
         try:
@@ -1289,6 +1289,56 @@ def confirm_mismatched_file(db, stash_client, stashdb_client, provider, stash_id
         return result
 
 
+def upgrade_compare(db, stash_client, provider, stash_id):
+    """The numbers behind "File is correct" on a failed UPGRADE download: the library file that would be replaced and the download, each
+    {"width", "height", "duration", "size"} (None when Stash doesn't have the file under that path). Returns {"old", "new"} or {"error"}."""
+    row = next((r for r in release_repo.list_rows_for_scene(db, provider, stash_id)
+                if r.get("import_error_code") == "fingerprint_mismatch" and r.get("pending_import_path") and r.get("upgrade_of")), None)
+    if row is None:
+        return {"error": "no failed upgrade download recorded for this release"}
+    return {"old": stash_client.file_details(row["upgrade_of"]), "new": stash_client.file_details(row["pending_import_path"])}
+
+
+def _confirm_upgrade(db, stash_client, provider, stash_id, old_path, new_path, new_scene, submit):
+    """"File is correct" for an upgrade download (v0.262.2): the same replacement a verified upgrade gets (upgrades.on_upgrade_imported():
+    merged into the existing library scene, the new file primary, the old one to the recycle bin). Refused, with nothing changed, when the
+    file to replace is not in Stash under its recorded path: then it is not certain what would be replaced. Caller holds _finalize_lock."""
+    if upgrade_import_hook is None:
+        return {"error": "upgrade replacement is not available"}
+    if old_path != new_path and stash_client.find_scene_by_path(old_path) is None:
+        return {"error": f"the file this upgrade should replace is not in Stash under its recorded path any more ({old_path}) -- nothing was changed"}
+
+    def restore():  # the hook forgets what it replaces first: keep the row retryable
+        with db.connect() as conn:
+            conn.execute("UPDATE release SET upgrade_of = ? WHERE provider = ? AND scene_stashdb_id = ?", (old_path, provider, stash_id))
+
+    try:
+        target = upgrade_import_hook(provider, stash_id, new_path, True)
+    except Exception as e:
+        logger.exception("confirm: replacing the file of upgrade %s failed", stash_id)
+        restore()
+        return {"error": f"couldn't replace the old file: {type(e).__name__}: {e}"}
+    if target is None:
+        restore()
+        return {"error": "couldn't replace the old file (no Stash scene to put the download into)"}
+    _trigger_generate(stash_client, target)
+    release_repo.set_pending_import_path_for_scene(db, provider, stash_id, None)
+    release_repo.set_status_for_scene(db, provider, stash_id, "imported")
+    release_repo.set_import_error_for_scene(db, provider, stash_id, "user_confirmed",
+                                            f"Confirmed by you although the file matches none of {_provider_label(provider)}'s fingerprints")
+    history.scene("warning", "import", "Upgrade confirmed by you although its fingerprints don't match -- old file replaced",
+                  provider, stash_id, details={"old": old_path, "new": new_path, "scene": target})
+    result = {"ok": True, "scene_id": target, "submitted": False, "upgrade": True}
+    if submit:
+        try:
+            result["submitted"] = stash_client.submit_fingerprints(target)
+            history.scene("info", "import", "Fingerprints of the confirmed file submitted to StashDB", provider, stash_id, details={"scene": target})
+        except Exception as e:
+            logger.exception("confirm: fingerprint submission for scene %s failed", target)
+            result["submit_error"] = f"{type(e).__name__}: {e}"
+    return result
+
+
 def recheck_failed_import(db, stash_client, stashdb_client, provider, stash_id, get_provider_client=None):
     """"Re-check fingerprints" on an Import-failed row (v0.235.0, 'fingerprint_mismatch'): asks the provider again for the scene's fingerprints
     -- somebody may have submitted ones since the download was judged -- and compares them with the file's. An exact match imports the file
@@ -1301,8 +1351,6 @@ def recheck_failed_import(db, stash_client, stashdb_client, provider, stash_id, 
                     if r.get("import_error_code") == "fingerprint_mismatch" and r.get("pending_import_path")), None)
         if row is None:
             return {"error": "no failed import with a recorded file for this release"}
-        if row.get("upgrade_of"):
-            return {"error": "this is an upgrade download -- it is handled in Upgrade wanted / Activity > Needs review"}
         path = row["pending_import_path"]
         client = _provider_client(provider, stashdb_client, get_provider_client)
         verified, found_title = verify_downloaded_file(stash_client, client, stash_id, path)

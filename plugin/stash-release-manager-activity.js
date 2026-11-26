@@ -628,9 +628,35 @@
             }
           },
         });
+        // An UPGRADE download replaces a library file: the question names both files first, and says so when the new one is shorter.
+        const upgradeQuestion = async () => {
+          const cmp = await window.SRW.runOp('releases_upgrade_compare', { provider: r.provider, scene_stashdb_id: r.scene_stashdb_id });
+          if (cmp.error) throw new Error(cmp.error);
+          const clock = (s) => (s ? `${Math.floor(s / 60)}:${String(Math.round(s) % 60).padStart(2, '0')}` : '?');
+          const fmt = (f) => (f ? `${f.width}x${f.height}, ${clock(Math.round(f.duration || 0))} min, ${f.size ? `${(f.size / 1e9).toFixed(2)} GB` : '? GB'}` : 'not in Stash');
+          const missing = cmp.old && cmp.new ? Math.round((cmp.old.duration || 0) - (cmp.new.duration || 0)) : 0;
+          const warning = missing > 30 ? `WARNING: the new file is ${clock(missing)} min SHORTER than yours. ` : '';
+          return `${warning}Replace your file of "${r.title}" with this download? Yours: ${fmt(cmp.old)}. New: ${fmt(cmp.new)}. `
+            + 'The old file goes to the recycle bin; rating, markers and play history stay with the scene.';
+        };
+        // Asks (upgrades: after fetching both files' numbers), then runs `action`.
+        const askConfirm = async (button, question, action, options) => {
+          if (!r.upgrade_of) { confirmInline(button, question, action, options); return; }
+          button.disabled = true;
+          fixStatus.textContent = ' comparing the files...';
+          try {
+            const upgradeText = await upgradeQuestion();
+            fixStatus.textContent = '';
+            button.disabled = false;
+            confirmInline(button, upgradeText + (options && options.suffix ? ` ${options.suffix}` : ''), action, { ...options, danger: true });
+          } catch (err) {
+            button.disabled = false;
+            fixStatus.textContent = ` error: ${err.message}`;
+          }
+        };
         const confirmBtn = window.SRW.iconButton('button', 'faCheck', 'File is correct', {
           title: 'The video IS this scene (e.g. a re-cut nobody registered a fingerprint for): keep the file and count it as imported',
-          onClick: (e) => confirmInline(e.currentTarget,
+          onClick: (e) => askConfirm(e.currentTarget,
             `Keep the file for "${r.title}" although it doesn't match the fingerprints? The scene gets this release's metadata and counts as imported.`,
             async () => {
               fixStatus.textContent = ' applying...';
@@ -648,7 +674,7 @@
         if (r.provider === 'stashdb' && uploadEnabled) { // hidden while submitting is off (Settings > Schedule & Import)
           uploadBtn = window.SRW.iconButton('button', 'faCloudArrowUp', 'Correct + submit to StashDB', {
             title: 'Like "File is correct", and the fingerprints of the file are submitted to StashDB (public, cannot be undone)',
-            onClick: (e) => confirmInline(e.currentTarget,
+            onClick: (e) => askConfirm(e.currentTarget,
               `Keep the file for "${r.title}" AND submit its fingerprints to StashDB? That is public and cannot be undone.`,
               async () => {
                 fixStatus.textContent = ' applying...';
@@ -659,7 +685,7 @@
                 if (result.submit_error) window.SRW.notify('Submit to StashDB', `The file is confirmed, but the submission failed: ${result.submit_error}`, 'error');
                 else window.SRW.notify('File is correct', `"${r.title}" is imported and its fingerprints were submitted to StashDB.`, 'success');
                 if (onChanged) onChanged();
-              }, { danger: true }),
+              }, { danger: true, suffix: 'The fingerprints are also submitted to StashDB: public, cannot be undone.' }),
           });
         }
         // Which scene the wrong file really is (v0.260.0): found at the mismatch (older rows: "Which scene is it?"). On the wishlist -> the file can be used for it.
