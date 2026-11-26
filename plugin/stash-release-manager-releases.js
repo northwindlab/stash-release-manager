@@ -1975,17 +1975,20 @@
     remember(calendarMonth, rawRows, shownSig);
     const index = () => new Map(all.filter((r) => r.status === 'new').map((r) => [r.scene_stashdb_id, r]));
     const sameRelease = (x, r) => x.provider === r.provider && x.scene_stashdb_id === r.scene_stashdb_id;
-    async function drawRows(rows) {
+    let localChanges = 0; // counts the changes made here (a card dismissed / handed off): a reading started before one of them is out of date
+    async function drawRows(rows, outdated = () => false) {
       const ents = new Map();
       groupByScene(rows).filter((r) => r.status !== 'dismissed').forEach((r) => ents.set(`${r.provider}:${r.entity_type}:${r.entity_stashdb_id}`, r));
       await Promise.all(Array.from(ents.values()).map((r) => resolveEntityImage(r.entity_type, r.entity_stashdb_id, r.provider)));
       rememberEntityImages();
+      if (outdated()) return false;
       rawRows = rows;
       all = groupByScene(rows);
       idToRelease = new Map(rows.filter((r) => r.status === 'new').map((r) => [r.scene_stashdb_id, r]));
       whisparrStatusCache = null;
       rebuildGrid();
       annotateWhisparr();
+      return true;
     }
     let refreshTimer = null;
     let refreshing = false;
@@ -1994,6 +1997,7 @@
       listWrap,
       // A card was dismissed / handed off: the card changes in place (the server answer is read right after and corrects it if it differs).
       patch(release, change) {
+        localChanges += 1;
         all = change.remove ? all.filter((x) => !sameRelease(x, release)) : all.map((x) => (sameRelease(x, release) ? { ...x, status: change.status } : x));
         rawRows = change.remove ? rawRows.filter((x) => !sameRelease(x, release)) : rawRows.map((x) => (sameRelease(x, release) ? { ...x, status: change.status } : x));
         idToRelease = index();
@@ -2025,18 +2029,23 @@
           try { await this.refreshNow(); } finally { refreshing = false; }
         }, Math.max(0, Math.min(6000, firstAsk + 40000 - now)));
       },
+      // A reading that was under way while a card changed here can still carry the old state: drawn, a dismissed card came back until the next
+      // reading (v0.262.4). Such an answer is dropped -- neither drawn nor remembered -- and the month is read again after the usual pause.
       async refreshNow() {
         const month = calendarMonth;
+        const seen = localChanges;
+        const outdated = () => localChanges !== seen;
         const light = await fetchMonthRows(month, true);
         if (!light || month !== calendarMonth || !listWrap.isConnected) return;
+        if (outdated()) { this.softRefresh(); return; }
         const sig = sigOf(light);
         if (sig === shownSig) return; // nothing changed: nothing is drawn, nothing more is asked
         if (gridWrap.querySelector('.srw-inline-confirm')) return;
         const rows = light.some((r) => 'details' in r) ? light : await fetchMonthRows(month); // the full rows only now that something differs
         if (!rows || month !== calendarMonth || !listWrap.isConnected) return;
+        if (outdated() || !(await drawRows(rows, outdated))) { this.softRefresh(); return; }
         shownSig = sigOf(rows);
         remember(month, rows, shownSig);
-        await drawRows(rows);
       },
       async goMonth(month) {
         calendarMonth = month;

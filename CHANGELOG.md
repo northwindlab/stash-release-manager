@@ -6,6 +6,9 @@ Version rules (from 0.199.0 on; before, almost every change raised the MINOR num
 MINOR = a new capability a user can use, or a change that needs the user to act; MAJOR = something that worked breaks. 1.0.0 comes when the
 install guide has been proven on other machines. Documentation only gets no version.
 
+## 0.262.4
+- **Calendar: a dismissed card no longer reappears for a while** (an outdated reading of the month was drawn over the change). Plugin only.
+
 ## 0.262.3
 - **A discarded wrong upgrade download leaves the upgrade "wanted" instead of "grabbed"** (which refused every further search). Blocked releases are kept; stuck entries are repaired at start-up. Sidecar + plugin (rebuild, Reload plugins).
 
